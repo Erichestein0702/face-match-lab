@@ -1,0 +1,302 @@
+{
+  "backend": "ArcFace",
+  "embedding_dim": 512,
+  "threshold": {
+    "cosine": 0.4,
+    "euclidean_max": 1.0954
+  },
+  "group_image": {
+    "size": [
+      1684,
+      1080
+    ],
+    "faces_detected": 33
+  },
+  "host_image": {
+    "size": [
+      1267,
+      951
+    ],
+    "faces_detected": 1
+  },
+  "target": {
+    "shoulder_hsv": {
+      "saturation": 39.8,
+      "value": 167.0
+    }
+  },
+  "host": {},
+  "comparison": {
+    "euclidean_distance": 0.9257,
+    "cosine_similarity": 0.5715,
+    "confidence_pct": 88.68,
+    "same_person": true
+  },
+  "ranking": [
+    {
+      "row": "第一排",
+      "cosine": 0.5715,
+      "euclidean": 0.9257,
+      "is_target": true,
+      "same_person": true,
+      "index": 1
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.3172,
+      "euclidean": 1.1686,
+      "is_target": false,
+      "same_person": false,
+      "index": 2
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.2108,
+      "euclidean": 1.2564,
+      "is_target": false,
+      "same_person": false,
+      "index": 3
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.1863,
+      "euclidean": 1.2757,
+      "is_target": false,
+      "same_person": false,
+      "index": 4
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.1366,
+      "euclidean": 1.3141,
+      "is_target": false,
+      "same_person": false,
+      "index": 5
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.134,
+      "euclidean": 1.3161,
+      "is_target": false,
+      "same_person": false,
+      "index": 6
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.1091,
+      "euclidean": 1.3348,
+      "is_target": false,
+      "same_person": false,
+      "index": 7
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.1023,
+      "euclidean": 1.3399,
+      "is_target": false,
+      "same_person": false,
+      "index": 8
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.0981,
+      "euclidean": 1.343,
+      "is_target": false,
+      "same_person": false,
+      "index": 9
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0966,
+      "euclidean": 1.3442,
+      "is_target": false,
+      "same_person": false,
+      "index": 10
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.0879,
+      "euclidean": 1.3506,
+      "is_target": false,
+      "same_person": false,
+      "index": 11
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0868,
+      "euclidean": 1.3514,
+      "is_target": false,
+      "same_person": false,
+      "index": 12
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.0643,
+      "euclidean": 1.368,
+      "is_target": false,
+      "same_person": false,
+      "index": 13
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0609,
+      "euclidean": 1.3704,
+      "is_target": false,
+      "same_person": false,
+      "index": 14
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0524,
+      "euclidean": 1.3767,
+      "is_target": false,
+      "same_person": false,
+      "index": 15
+    },
+    {
+      "row": "第三排",
+      "cosine": 0.0416,
+      "euclidean": 1.3845,
+      "is_target": false,
+      "same_person": false,
+      "index": 16
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0406,
+      "euclidean": 1.3852,
+      "is_target": false,
+      "same_person": false,
+      "index": 17
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0084,
+      "euclidean": 1.4083,
+      "is_target": false,
+      "same_person": false,
+      "index": 18
+    },
+    {
+      "row": "第二排",
+      "cosine": 0.0035,
+      "euclidean": 1.4117,
+      "is_target": false,
+      "same_person": false,
+      "index": 19
+    },
+    {
+      "row": "第三排",
+      "cosine": 0.003,
+      "euclidean": 1.4121,
+      "is_target": false,
+      "same_person": false,
+      "index": 20
+    },
+    {
+      "row": "第一排",
+      "cosine": 0.0028,
+      "euclidean": 1.4122,
+      "is_target": false,
+      "same_person": false,
+      "index": 21
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.0072,
+      "euclidean": 1.4193,
+      "is_target": false,
+      "same_person": false,
+      "index": 22
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.0115,
+      "euclidean": 1.4223,
+      "is_target": false,
+      "same_person": false,
+      "index": 23
+    },
+    {
+      "row": "第三排",
+      "cosine": -0.0118,
+      "euclidean": 1.4226,
+      "is_target": false,
+      "same_person": false,
+      "index": 24
+    },
+    {
+      "row": "第三排",
+      "cosine": -0.0241,
+      "euclidean": 1.4311,
+      "is_target": false,
+      "same_person": false,
+      "index": 25
+    },
+    {
+      "row": "第三排",
+      "cosine": -0.0286,
+      "euclidean": 1.4343,
+      "is_target": false,
+      "same_person": false,
+      "index": 26
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.0334,
+      "euclidean": 1.4377,
+      "is_target": false,
+      "same_person": false,
+      "index": 27
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.0531,
+      "euclidean": 1.4512,
+      "is_target": false,
+      "same_person": false,
+      "index": 28
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.0562,
+      "euclidean": 1.4534,
+      "is_target": false,
+      "same_person": false,
+      "index": 29
+    },
+    {
+      "row": "第一排",
+      "cosine": -0.0572,
+      "euclidean": 1.4541,
+      "is_target": false,
+      "same_person": false,
+      "index": 30
+    },
+    {
+      "row": "第三排",
+      "cosine": -0.0618,
+      "euclidean": 1.4573,
+      "is_target": false,
+      "same_person": false,
+      "index": 31
+    },
+    {
+      "row": "第一排",
+      "cosine": -0.0784,
+      "euclidean": 1.4686,
+      "is_target": false,
+      "same_person": false,
+      "index": 32
+    },
+    {
+      "row": "第二排",
+      "cosine": -0.107,
+      "euclidean": 1.488,
+      "is_target": false,
+      "same_person": false,
+      "index": 33
+    }
+  ],
+  "privacy_note": "本报告已移除人脸框坐标与原始图片路径；index 为按相似度排序后的匿名序号。"
+}

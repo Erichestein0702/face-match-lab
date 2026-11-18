@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 模型权重缓存（首次运行会自动下载，无需入库）
+.cache/
+*.onnx
+*.tflite
+*.bin
+*.pth
+*.pt
+*.pth.tar
+
+# 运行期输出（按需保留结构，不提交中间产物）
+assets/crops/*
+!assets/crops/.gitkeep
+/results/
+logs/
+*.log
+
+# 凭据与敏感信息
+.env
+.env.*
+*.pem
+*.key
+token*.txt
+.real_token.txt

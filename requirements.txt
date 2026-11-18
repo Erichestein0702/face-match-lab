@@ -1,0 +1,10 @@
+# 核心依赖
+# 人脸检测 + 512维 ArcFace 特征提取
+insightface>=0.7.3
+onnxruntime>=1.16.0
+# 图像处理（headless 版更适合服务器 / CI 环境）
+opencv-python-headless>=4.8.0
+# 数值计算
+numpy>=1.24.0
+# 图表绘制
+matplotlib>=3.7.0
