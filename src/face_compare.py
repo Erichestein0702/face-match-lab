@@ -466,6 +466,9 @@ def run(args):
 
     # ---- 4) 遍历群像图全部人脸 ----
     # 内部保留 bbox 供可视化使用；写入 JSON 前会剥离坐标（见 anonymize_ranking）。
+    # 注意：_cos_raw 保留未舍入的余弦值。排序与 margin 差值必须用原始值计算，
+    # 否则「先舍入再相减」会引入 1e-4 量级的误差，
+    # 导致同一份数据在 face_compare 与 selftest 中给出不同的 margin。
     ranking = []
     for f in faces_g:
         c = cosine(f.embedding, subject.embedding)
@@ -474,12 +477,12 @@ def run(args):
             "center": [round(v, 1) for v in f.center],
             "position": row_label(f.center[1], hg),
             "cosine": round(c, 4),
+            "_cos_raw": c,
             "euclidean": round(euclidean(f.embedding, subject.embedding), 4),
             "is_target": f is target,
             "same_person": c >= thr,
         })
-    ranking.sort(key=lambda r: -r["cosine"])
-
+    ranking.sort(key=lambda r: -r["_cos_raw"])
     print(f"\n========== 遍历群像图 {len(faces_g)} 张人脸 vs 参考像主体 ==========")
     print(f"{'排名':<6}{'位置':<10}{'余弦':<10}{'欧氏':<9}{'判定'}")
     for rank, r in enumerate(ranking, 1):
@@ -489,7 +492,9 @@ def run(args):
 
     best = ranking[0]
     save_crop(img_g, best["bbox"], os.path.join(args.crop_dir, "best_match_group.jpg"))
-    margin = (ranking[0]["cosine"] - ranking[1]["cosine"]) if len(ranking) > 1 else None
+    # margin 用未舍入值相减，最后再舍入 —— 与 selftest.py 的算法保持一致
+    margin = ((ranking[0]["_cos_raw"] - ranking[1]["_cos_raw"])
+              if len(ranking) > 1 else None)
     if margin is not None:
         print(f"\n最佳匹配: 排名1 ({best['position']}), 余弦={best['cosine']:.4f}, "
               f"置信度={confidence_pct(best['cosine'], thr):.2f}%, "

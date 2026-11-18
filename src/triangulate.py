@@ -153,21 +153,23 @@ def main():
     print(f"\n三对全部一致: {'确认为同一人' if all_same else '存在不一致，需人工复核'}")
 
     # --- 群像图全部人脸 vs 第三视角人物，验证唯一性 ---
+    # 与 face_compare 一致：保留未舍入余弦用于排序与 margin 计算
     ranking = []
     for f in dg:
         c = cosine(f.embedding, C["emb"])
         ranking.append({"bbox": f.bbox, "center": [round(v, 1) for v in f.center],
-                        "position": "", "cosine": round(c, 4),
+                        "position": "", "cosine": round(c, 4), "_cos_raw": c,
                         "euclidean": round(euclidean(f.embedding, C["emb"]), 4),
                         "is_target": f is tgt, "same_person": c >= THR})
-    ranking.sort(key=lambda r: -r["cosine"])
+    ranking.sort(key=lambda r: -r["_cos_raw"])
     print(f"\n========== 群像图 {len(dg)} 张人脸 vs 第三视角人物（C）==========")
     print(f"{'排名':<6}{'余弦':<10}{'欧氏':<9}{'判定'}")
     for rank, r in enumerate(ranking, 1):
         mark = "  <== 目标" if r["is_target"] else ""
         print(f"#{rank:<5}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
               f"{'是' if r['same_person'] else '否'}{mark}")
-    margin = (ranking[0]["cosine"] - ranking[1]["cosine"]) if len(ranking) > 1 else None
+    margin = ((ranking[0]["_cos_raw"] - ranking[1]["_cos_raw"])
+              if len(ranking) > 1 else None)
 
     os.makedirs(args.out_dir, exist_ok=True)
     vis = img_p.copy()

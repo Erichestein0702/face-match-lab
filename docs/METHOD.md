@@ -5,6 +5,8 @@
 > **数据说明**：文中「实测结果」一节的数值由仓库自带的 **NASA 公有领域示例照片**
 > 计算得出，可一键复现：`python src/face_compare.py --samples`。
 > 素材来源与授权见 [`samples/README.md`](../samples/README.md)。
+>
+> English version: [METHOD.en.md](METHOD.en.md)
 
 ---
 
@@ -234,8 +236,8 @@ python scripts/selftest.py --group a.jpg --reference b.jpg --third c.jpg
 
 | 参考像 | Top-1 | Top-2 | 差值 |
 |---|---|---|---|
-| Glenn 肖像 | 0.5645 | 0.1831 | **0.3814** |
-| Cooper 肖像（负对照） | 0.4363 | 0.1443 | **0.2920** |
+| Glenn 肖像 | 0.5645 | 0.1831 | **0.3813** |
+| Cooper 肖像（负对照） | 0.4380 | 0.1395 | **0.2985** |
 
 差值远大于阈值边界，说明结果稳健、不存在边界抖动。
 

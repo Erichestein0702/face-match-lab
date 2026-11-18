@@ -2,252 +2,318 @@
 
 # 🧬 FaceMatch Lab
 
-**基于 ArcFace 深度人脸识别的「同一人」判定流水线**
+**Deep face recognition for answering one question: *is this the same person?***
 
-*检测 → 语义定位 → 512维特征 → 欧氏距离/余弦相似度 → 阈值判定 → 全图遍历排名 → 三角验证*
+*Detect → Locate → 512-d Embedding → Distance & Cosine Similarity → Verdict → Full-Image Ranking → Triangulated Verification*
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3B4256?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![InsightFace](https://img.shields.io/badge/InsightFace-4A90D9?style=flat-square)](https://github.com/deepinsight/insightface)
 [![License](https://img.shields.io/badge/License-MIT-3DDC84?style=flat-square)](LICENSE)
 
+[English](README.md) · [中文](README.zh-CN.md)
+
 </div>
 
 ---
 
-## 📌 这是什么
+## ❓ The Problem
 
-给定**一张群像图**和**一张参考像**，自动完成：定位目标人物 → 提取 **512 维 ArcFace 特征**
-→ 按官方标准阈值判定「是否同一人」并给出置信度 → **遍历全图所有人脸**输出排名表
-→ 用第三张照片做**三角验证**排除单张误判。
+You have **a group photo** and **one photo of the person you're looking for**. You need to know:
 
-仓库自带 **NASA 公有领域公开示例**，克隆即可运行，无需准备任何数据。
+> *Is the person I want in this photo actually in this photo?*
 
-> **为什么没用 `face_recognition`？** 它依赖 `dlib`，Python 3.13+ 无预编译 wheel；
-> 其 0.6 欧氏阈值也只适用于 dlib 的 128 维特征。本项目改用同级别主流库的官方阈值，
-> 并提供**自动降级**链路。
+Most face-matching demos answer a much easier question — "are these two cropped faces the same person?" — and they usually answer it by returning a single number with no way to tell whether that number means anything.
+
+**FaceMatch Lab is built around the harder version.** It takes the group photo, finds every face in it, ranks them against your reference photo, and tells you not only *who* it found but *how confident* it is and *how unique* the match is.
 
 ---
 
-## 💡 工程亮点
+## ✅ What You Get
 
-### 1. 结论可复现，且有负对照兜底
-
-文档里所有数值都是**跑出来的**，不是手写的。仓库内置一组自带答案的公开对照组，
-并用**负对照**坐实算法有效性 —— 这是多数人脸检索 Demo 做不出来的。
-
-**NASA 公开示例（7 人群像，ArcFace 512 维）**
-
-| 指标 | 数值 | 说明 |
-|:---|---:|:---|
-| 群像检测 | 检出 7 张人脸 | — |
-| 欧氏距离 | **0.9333** | 同一人参考 ≤ 1.095 ✅ |
-| 余弦相似度 | **0.5645 (56.45%)** | 阈值 0.40 ✅ |
-| 相似度置信度 | **87.80%** | logistic 映射，阈值处为 50% |
-| **判定结论** | **✅ 是同一人** | — |
-| Top-1 与 Top-2 差值 | **0.3814** | 匹配唯一，无边界抖动 |
-| 三角验证 | 0.5645 / 0.7105 / 0.5650 | 三对两两一致 ✅ |
-| **负对照** | 换 Cooper 肖像后 Top-1 **自动切换**（0.4363） | ✅ |
-
-最后一项最关键：换成另一个人的肖像，Top-1 会自动跳到群像图里的另一个人。
-这证明排名反映的是**真实身份相似性**，而不是「永远给某张固定的脸打高分」。
-
-**真实场景实测（17 人大合照）**
-
-用一张 17 人的黑白大合照 + 两张同一人的不同照片（室内半身 / 户外特写，
-拍摄条件差异大）验证：
-
-| 验证项 | 实测 | 结论 |
-|:---|:---|:---:|
-| 群像检测 | 检出 **17** 张人脸 | ✅ |
-| 主判定 | Top-1 余弦 **0.5370**（命中目标） | ✅ 同一人 |
-| 唯一性 | Top-1 0.5370 vs Top-2 0.0760，差 **0.4610** | ✅ 匹配唯一 |
-| 负对照 | 群像中其余人最高仅 **0.0760**，全员不过线 | ✅ 不是碰巧高分 |
-| 三角验证 | 0.5370 / 0.4020 / 0.6663 三对全过 | ✅ |
-| **参考像鲁棒** | 换成户外特写当参考像，**仍命中同一张脸** | ✅ |
-
-> 该组照片仅用于本地验证，**未入库**（含可识别水印，属生物识别信息）。
-> 仓库内所有图像均为 NASA 公有领域素材。
-
-![三角验证](assets/charts/confidence_bars.png)
-
-![相似度分布](assets/charts/similarity_chart.png)
-
-### 2. 双后端自动降级，不挑环境
-
-主后端 `insightface`（ArcFace 512 维）在部分平台没有预编译 wheel，
-此时**自动降级**到 OpenCV Zoo（YuNet + SFace 128 维），功能完整可用。
-两条链路的阈值分别取各自官方标准值。
-
-### 3. 多尺度检测，解决群像小脸漏检
-
-群像后排人脸只有几十像素，单一输入尺寸必然漏检。本项目在 **640 / 1600**
-两档长边分别检测后用 **IoU < 0.4** 贪心 NMS 合并，特写与大合照同时兼顾。
-
-> ⚠️ SCRFD 的 anchor stride 为 32，输入边长必须为 32 的倍数，否则
-> `onnxruntime` 直接抛 `Invalid input shape`。`det_sizes()` 已做修正。
-
-### 4. 定位策略与身份解耦，结论才有独立意义
-
-| 类型 | 策略 | 回答的问题 |
-|:---|:---|:---|
-| **检索型** | `retrieve`（默认） | 「这群人里**有没有**这个人」 |
-| **几何型** | `largest` / `front-right` / `white-shirt` / `index:N` | 「我指认的**这个位置**的人，是不是这个人」 |
-
-几何型策略选人时**完全不看参考像**，判定结果具独立意义，可与检索型交叉验证。
-所有策略带兜底链，任何构图下不中断。
-
-### 5. 隐私是架构约束，不是事后补救
-
-- JSON 报告**不写入** `bbox` / `center` / `path`（坐标一旦与原图同时泄露，可反推每个人在画面中的位置）
-- `data/` 目录全程 gitignore，使用者的照片**永远不会**进入 git 历史
-- **六层隐私体检**（历史 blob / 工作树 / 文本模式 / 报告字段 / ignore 规则 / 公开样例指纹）在 CI 中强制执行
-- CI 还跑**负对照断言**，防止算法退化后仍「看起来通过」
-
-### 6. 全链路配置化 + 结果带唯一性度量
-
-路径优先级统一为 **命令行 > 环境变量 > `src/config.py` 默认值**，
-手机 / Colab 还能直接喂 http(s) 直链。置信度采用**以阈值为中点的 logistic 映射**
-（`cos == 阈值 → 50%`），报告额外给出 **Top-1 与 Top-2 的差值**（`ranking_margin`）——
-差值大说明匹配唯一、不存在边界抖动，比单看一个分数稳健得多。
+| | |
+|:---|:---|
+| 🧍 **Automatic location** | Finds the target among every face in the group — no manual cropping |
+| 📊 **A ranked table** | Every face in the group, sorted by similarity, with a verdict for each |
+| 🎯 **Uniqueness, not just a score** | Reports the gap between Top-1 and Top-2, so you know if the match is decisive |
+| 🔺 **Triangulated verification** | Cross-checks the result against a third photo before trusting it |
+| 🧪 **Self-testing built in** | 6 assertions that prove the algorithm still works — not just that the code runs |
+| 🔒 **Privacy by architecture** | Reports contain no coordinates, no file paths; your photos never enter git |
 
 ---
 
-## 🚀 快速开始
+## 🚀 Try It in 60 Seconds
 
-脚本会自动 `pip install` 缺失依赖、自动下载模型、自动选择后端。
+No data, no setup, no API keys. The repo ships with **NASA public-domain photographs**:
 
 ```bash
 git clone https://github.com/Erichestein0702/face-match-lab.git
 cd face-match-lab
 
-python src/face_compare.py --samples      # 主流程：定位 + 比对 + 遍历 + JSON
-python src/triangulate.py  --samples       # 三角验证
-python src/plot_results.py                 # 生成图表
-python scripts/selftest.py --samples       # 端到端自测（6 项断言）
+python src/face_compare.py --samples      # main pipeline: locate → compare → rank → report
+python src/triangulate.py  --samples       # triangulated verification
+python scripts/selftest.py --samples       # 6-assertion end-to-end self-test
 ```
 
-### 用自己的照片
+The scripts install missing dependencies, download models on first run, and
+auto-select the best available backend. **Pure CPU — no GPU required.**
 
-> 🔒 照片属于生物识别信息，必须由使用者自行准备、放在本地 `data/`，
-> 该目录已被 `.gitignore` 排除，**永远不会进入 git 历史**。
+<details>
+<summary>Prefer to install dependencies yourself?</summary>
+
+```bash
+pip install -r requirements.txt
+```
+
+> **Python 3.13+**: `insightface` has no prebuilt wheel yet — use
+> `pip install insightface --no-build-isolation`. If that fails, the project
+> **automatically falls back** to OpenCV Zoo (YuNet + SFace) with full functionality.
+</details>
+
+---
+
+## 📸 What It Looks Like
+
+### Real-world validation
+
+A 17-person group photo plus two photos of the same individual under very
+different conditions (indoor half-body shot / outdoor close-up):
+
+| Check | Result | |
+|:---|:---|:---:|
+| Face detection | **17** faces found in the group photo | ✅ |
+| Main verdict | Top-1 cosine **0.5370** → correct person found | ✅ Same person |
+| Uniqueness | Top-1 0.5370 vs Top-2 0.0760 — gap of **0.4610** | ✅ Unambiguous |
+| Negative control | Highest score among *everyone else*: **0.0760** — nobody else comes close | ✅ Not a lucky guess |
+| Triangulation | 0.5370 / 0.4020 / 0.6663 — all three pairs consistent | ✅ |
+| **Reference robustness** | Swap in the outdoor close-up as the reference — **still lands on the same face** | ✅ |
+
+> These photos were used for **local validation only and are not in the repository**
+> (they carry identifiable watermarks). Every image shipped in this repo is
+> NASA public-domain material.
+
+### Public sample (7-person group photo)
+
+| Metric | Value | |
+|:---|---:|:---|
+| Euclidean distance | **0.9333** | same person ≤ 1.095 ✅ |
+| Cosine similarity | **0.5645 (56.45%)** | threshold 0.40 ✅ |
+| Confidence | **87.80%** | logistic mapping, 50% at threshold |
+| **Verdict** | **✅ Same person** | — |
+| Top-1 − Top-2 gap | **0.3813** | decisive, no borderline jitter |
+| Triangulation | 0.5645 / 0.7105 / 0.5650 | all three pairs consistent ✅ |
+| **Negative control** | Swap in another astronaut's portrait → Top-1 **switches** (0.4380) | ✅ |
+
+That last row is the one that matters. Swap the reference photo and the Top-1
+result **moves to a different person**. The ranking reflects genuine identity
+similarity — it isn't just "always give the biggest face a high score", which
+is what most face-search demos actually do.
+
+![Triangulated verification](assets/charts/confidence_bars.png)
+
+![Similarity distribution](assets/charts/similarity_chart.png)
+
+---
+
+## 💡 Why It's Built This Way
+
+### 1. Reproducible conclusions, backed by a negative control
+
+Every number in this README was **produced by running the code**, not written by
+hand. The repository ships a self-contained control set with known answers, and
+the negative control proves the search is genuinely recognising identity rather
+than rewarding whatever face happens to look biggest.
+
+### 2. Two backends, automatic fallback
+
+The primary backend is `insightface` (ArcFace, 512-d). On platforms without a
+prebuilt wheel it **degrades automatically** to OpenCV Zoo (YuNet + SFace,
+128-d). Each path uses its own library's official threshold — nothing here is
+a number someone made up.
+
+### 3. Multi-scale detection — no missed faces in the back row
+
+In a group photo, faces in the back row may be only a few dozen pixels tall.
+A single input size will miss them. This project detects at **640** and
+**1600** long-edge scales and merges with **IoU < 0.4** greedy NMS, so close-ups
+and wide group shots both work.
+
+> ⚠️ SCRFD's anchor stride is 32 — input dimensions must be a multiple of 32,
+> or `onnxruntime` throws `Invalid input shape`. `det_sizes()` handles this.
+
+### 4. Locating a person and identifying a person are separate problems
+
+| Type | Strategy | The question it answers |
+|:---|:---|:---|
+| **Retrieval** | `retrieve` (default) | *"Is this person **in** the photo?"* |
+| **Geometric** | `largest` / `front-right` / `white-shirt` / `index:N` | *"Is the person **at this position** the one I'm looking for?"* |
+
+Geometric strategies never look at the reference photo when choosing a face, so
+their verdict is **independent evidence** — you can cross-check it against the
+retrieval result.
+
+### 5. Privacy is enforced by the architecture, not by a README warning
+
+- JSON reports **never contain** `bbox`, `center`, or `path`. Coordinates plus
+  the original photo let anyone map every face in the group to a pixel position.
+- `data/` is gitignored end to end — your photos can never enter git history.
+- A **six-layer privacy audit** (history blobs / worktree / text patterns /
+  report fields / ignore rules / sample fingerprints) runs in CI and fails the build.
+- CI also runs the **negative-control assertion**, so the pipeline cannot silently
+  degrade while still looking green.
+
+### 6. Results carry confidence *and* uniqueness
+
+- Confidence uses a **logistic mapping centred on the threshold** — a cosine
+  exactly at the threshold reads 50%.
+- The report also includes **`ranking_margin`** (Top-1 minus Top-2). A large gap
+  means the match is decisive and not sitting on a boundary — far more robust
+  than looking at one score.
+
+---
+
+## 🧪 Self-Testing
+
+`scripts/selftest.py` turns "it runs" into **an assertable regression test**.
+Each check returns PASS / FAIL / SKIP; any FAIL means a non-zero exit code,
+so it drops straight into CI.
+
+| ID | Check | Assertion |
+|:---|:---|:---|
+| T1 | Main verdict | Group retrieval Top-1 is judged "same person" |
+| T2 | Uniqueness | Top-1 − Top-2 cosine gap > 0.05 (the match must be decisive) |
+| T3 | Negative control | Everyone *else* in the group scores below threshold |
+| T4 | Pass count | Exactly **1** face in the group crosses the threshold |
+| T5 | Triangulation | A-B / A-C / B-C all agree (needs a third photo) |
+| T6 | Reference robustness | Swap the reference photo → **the same face** is found again |
+
+T3 and T4 together rule out two distinct failure modes: a lucky high score, and
+everyone scoring high.
+
+```bash
+python scripts/selftest.py                          # public sample
+python scripts/selftest.py --data-dir data          # your own photos
+python scripts/selftest.py --group a.jpg --reference b.jpg --third c.jpg
+python scripts/selftest.py --json results/selftest.json
+```
+
+T5 / T6 need a third photo; without one they are marked SKIP rather than failed.
+
+---
+
+## 📂 Using Your Own Photos
+
+> 🔒 Facial images are **biometric data**. The project never ships, requests, or
+> accepts real face photos. You supply your own, locally, in `data/` — which is
+> gitignored and can never enter git history.
 
 ```
-data/                          # 本地数据目录（已 gitignore，永不入库）
-├── group.jpg                 # 群像图（多人）—— 遍历排名的输入
-├── reference.jpg             # 参考像（单人）—— 比对基准
-├── third.jpg                 # 第三视角（可选）—— 三角验证
-└── <代号>/                   # 单人人脸样本库（可选，供检索/复现）
+data/                          # local data directory (gitignored, never committed)
+├── group.jpg                 # group photo (multiple people)
+├── reference.jpg             # reference photo (single person)
+├── third.jpg                 # third angle (optional) — enables triangulation
+└── <codename>/               # single-person sample library (optional)
     └── 01.jpg
 ```
 
 ```bash
-python scripts/prepare_data.py --template    # 生成目录骨架（纯文本）
-# 把已获授权的照片按上述结构放进 data/
-python scripts/prepare_data.py --check       # 检查结构是否符合约定
+python scripts/prepare_data.py --template    # scaffold the directory structure (text only)
+# place your authorised photos as above
+python scripts/prepare_data.py --check       # verify the structure
 
 python src/face_compare.py --data-dir data
-python scripts/selftest.py --data-dir data  # 用自己的数据跑 6 项断言
+python scripts/selftest.py --data-dir data  # run the 6 assertions on your own data
 ```
 
-没有合适的照片？可从公开数据集获取（同样落在 `data/`，不入库）：
+No suitable photos? Pull from a public dataset (also lands in `data/`, never committed):
 
 ```bash
 python scripts/prepare_data.py --dataset lfw --num-identities 10
 ```
 
-> ⚠️ 公开数据集的图像同样受各自许可约束，商用前请自行确认授权范围。
+> ⚠️ Public datasets carry their own licences — check the terms before commercial use.
 
-**其他**：`pip install -r requirements.txt` 手动装依赖；
-Python 3.13+ 需 `pip install insightface --no-build-isolation`，装不上会自动降级；
-也支持 http(s) 直链输入（手机 / Colab 友好）。
-
----
-
-## 🧪 端到端自测
-
-`scripts/selftest.py` 把「跑得通」变成**可断言的回归测试**，每项检查返回 PASS / FAIL，
-退出码非 0 即回归失败，可直接接入 CI。
-
-| 编号 | 检查项 | 断言 |
-|:---|:---|:---|
-| T1 | 主判定 | 群像检索 Top-1 判定为「同一人」 |
-| T2 | 唯一性 | Top-1 与 Top-2 的余弦差 > 0.05（匹配必须唯一） |
-| T3 | 负对照 | 群像中**其他人**的相似度低于阈值 |
-| T4 | 过线人数 | 群像中恰好 **1** 张脸过阈值 |
-| T5 | 三角验证 | A-B / A-C / B-C 三对两两一致（需第三视角） |
-| T6 | 参考像鲁棒 | 换用第三视角作参考像，**命中同一张脸** |
+**Also supports http(s) URLs directly** (handy from a phone or Colab):
 
 ```bash
-python scripts/selftest.py                          # NASA 公开示例
-python scripts/selftest.py --data-dir data          # 自己的照片
-python scripts/selftest.py --group a.jpg --reference b.jpg --third c.jpg
-python scripts/selftest.py --json results/selftest.json
+python src/face_compare.py "https://example.com/group.jpg" "https://example.com/reference.jpg"
 ```
-
-T5 / T6 需要第三视角，缺失时自动标记 SKIP（不视为失败）。
 
 ---
 
-## 🧠 算法设计
+## ⚙️ How It Works
 
-| 特征 | 维度 | 余弦阈值 | 等价欧氏距离 |
+| Backend | Dim | Cosine threshold | Equivalent Euclidean |
 |:---|---:|---:|---:|
-| ArcFace `w600k_r50`（主） | 512 | **≥ 0.40** | ≤ 1.095 |
-| SFace / OpenCV Zoo（降级） | 128 | ≥ 0.363 | ≤ 1.088 |
+| ArcFace `w600k_r50` (primary) | 512 | **≥ 0.40** | ≤ 1.095 |
+| SFace / OpenCV Zoo (fallback) | 128 | ≥ 0.363 | ≤ 1.088 |
 
 ```
+cosine_similarity = 1 - (euclidean_distance² / 2)     # for L2-normalised embeddings
+
 confidence = 100 / (1 + exp(-12 * (cos_sim - threshold)))
 ```
 
-`cos_sim == threshold` → 50%，越高于阈值越接近 100%。
-几何型策略判据：下半区 `y/H > 0.52`、最右侧按 `x` 降序、白衣为肩部 HSV `S<70 且 V>140`。
+`cos_sim == threshold` → 50%; the further above, the closer to 100%.
 
-> 详细方法学与边界分析见 **[docs/METHOD.md](docs/METHOD.md)**。
+Geometric strategy criteria: lower half `y/H > 0.52` · rightmost by `x` ·
+white clothing = shoulder HSV `S < 70` and `V > 140`.
+
+> Full methodology, parameter rationale, and boundary analysis:
+> **[docs/METHOD.en.md](docs/METHOD.en.md)** (中文版: [docs/METHOD.md](docs/METHOD.md))
 
 ---
 
-## 📁 项目结构
+## 📁 Project Layout
 
 ```
 face-match-lab/
 ├── src/
-│   ├── config.py             # 路径与环境变量集中管理（无第三方依赖）
-│   ├── face_compare.py       # 主程序：定位 + 特征 + 比对 + 遍历 + 标注 + JSON
-│   ├── triangulate.py        # 三图三角验证
-│   └── plot_results.py       # 由 JSON 报告生成可视化图表
+│   ├── config.py             # centralised paths & environment variables (no third-party deps)
+│   ├── face_compare.py       # main pipeline: locate → embed → compare → rank → annotate → JSON
+│   ├── triangulate.py        # three-image triangulated verification
+│   └── plot_results.py       # visualisation charts generated from the JSON reports
 ├── scripts/
-│   ├── selftest.py           # 端到端自测：6 项断言，支持外部数据目录
-│   ├── prepare_data.py       # 数据准备：结构检查 / 骨架生成 / 公开示例复制 / 数据集下载
-│   ├── make_synthetic_data.py# 程序绘制的卡通测试图（不含真实人脸）
-│   └── privacy_audit.py      # 隐私终审：六层扫描历史/工作树/文本/报告/忽略规则/样例指纹
-├── samples/                  # 公开示例（NASA 公有领域照片，已入库）
-├── data/                     # 用户本地数据目录（已 gitignore，永不入库）
-├── assets/charts/            # 相似度分布图 / 三角验证条形图（纯数据图，不含人脸）
-├── assets/results/           # 脱敏后的 JSON 报告
-├── docs/METHOD.md            # 方法学说明
-├── results/                  # 运行时产物（已 gitignore）
-└── .github/workflows/ci.yml  # CI：语法检查 + 公开样例冒烟 + 负对照 + 泄露校验 + 隐私体检
+│   ├── selftest.py           # 6-assertion end-to-end self-test; works on any external data dir
+│   ├── prepare_data.py       # data prep: structure check / scaffold / copy samples / fetch datasets
+│   ├── make_synthetic_data.py# programmatically drawn cartoon faces (no real people)
+│   └── privacy_audit.py      # six-layer privacy audit over history / worktree / text / reports / ignore
+├── samples/                  # public sample photos (NASA public domain)
+├── data/                     # your local data directory (gitignored, never committed)
+├── assets/charts/            # similarity distribution & confidence bars (data-only, no faces)
+├── assets/results/           # redacted JSON reports
+├── docs/METHOD.en.md         # methodology (中文: docs/METHOD.md)
+├── results/                  # runtime artefacts (gitignored)
+└── .github/workflows/ci.yml  # CI: syntax → smoke → self-test → leak check → privacy audit
 ```
 
 ---
 
-## 🔒 隐私与合规
+## 🔒 Privacy & Compliance
 
-**不含私人照片** —— 使用者照片一律放在 `data/`，该目录已 gitignore，永不入库；
-仓库内人脸图像仅为 NASA 公有领域素材（来源见 `samples/README.md`）。
+**No private photos.** Your photos belong in `data/`; that directory is
+gitignored and can never be committed. The only real face images in this
+repository are the NASA public-domain samples listed in
+[`samples/README.en.md`](samples/README.en.md).
 
-**报告脱敏** —— JSON 不写出 `bbox`/`center`/`path`；图表纵轴用匿名序号 + 位置标签，
-不含任何像素坐标。坐标属于「可定位的生物识别信息」，原图与坐标同时泄露即可反推出
-群像中每个人的位置；而相似度、欧氏距离、置信度已足以完整表达算法行为。
+**Redacted reports.** JSON contains no `bbox` / `center` / `path`; chart axes use
+anonymous indices and position labels, never pixel coordinates. Coordinates are
+*locatable biometric data* — released alongside the original photo, they reveal
+where every person stands. Similarity, distance, confidence, and the verdict
+already express the algorithm's behaviour completely.
 
-**ignore 兜底** —— `.gitignore` 排除一切图像文件，仅显式放行 `samples/` 与 `assets/charts/`。
+**Ignore-rule backstop.** `.gitignore` excludes all image formats by default and
+explicitly re-admits only `samples/` and `assets/charts/`.
 
-**CI 自动校验** —— 流水线检查报告是否含敏感字段，命中即失败；
-`python scripts/privacy_audit.py` 可本地跑六层扫描。
+**Automated in CI.** The pipeline fails the build if a generated report contains
+sensitive fields. `python scripts/privacy_audit.py` runs the same six layers locally.
 
-**使用须知** —— 本项目用于技术验证与研究，人脸识别属生物识别信息处理，请遵守当地法律法规；
-放入 `data/` 的照片须确保已取得被拍摄者的明确授权；不要用于未经授权的监控、追踪或身份认定；
-展示结果时只分享统计量与图表，不要分享原图。
+**Please note.** This project is for technical research and validation. Face
+recognition is the processing of biometric data — comply with the law that
+applies to you (GDPR in the EU/UK, PIPL in China, and equivalents elsewhere).
+Photos you place in `data/` must have the **explicit consent** of the people
+captured. Do not use it for unauthorised surveillance, tracking, or identity
+verification. When sharing results, share the statistics and charts — not the
+original photos.
 
 ---
 
