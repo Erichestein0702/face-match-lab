@@ -92,7 +92,9 @@ jobs:
           for path in ("results/report.json", "results/triangulation.json",
                        "results/selftest.json"):
               text = open(path, encoding="utf-8").read()
-              for bad in ('"bbox"', '"center"', '"path"'):
+              # bbox/center/path 为可定位生物识别信息；_cos_raw 为内部未舍入中间量，
+              # 两者都不应出现在任何落盘产物中
+              for bad in ('"bbox"', '"center"', '"path"', '"_cos_raw"'):
                   if bad in text:
                       print(f"FAIL {path}: 仍包含敏感字段 {bad}")
                       sys.exit(1)

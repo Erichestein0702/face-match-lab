@@ -52,7 +52,10 @@ SAMPLE_SHA256 = {
 }
 
 #: 报告中禁止出现的字段
-FORBIDDEN_JSON_KEYS = ('"bbox"', '"center"', '"path"', '"face_path"', '"image_path"')
+#: 注：``_cos_raw`` 是流水线内部的未舍入余弦中间量，仅用于保证排序与
+#: margin 差值的一致性，不应出现在任何落盘产物中。
+FORBIDDEN_JSON_KEYS = ('"bbox"', '"center"', '"path"', '"face_path"', '"image_path"',
+                       '"_cos_raw"')
 
 #: 文本中禁止出现的模式
 #: 注：``samples/`` 现在是**合法的公开示例目录**（NASA 公有领域照片，已入库），
