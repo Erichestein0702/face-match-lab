@@ -121,12 +121,21 @@ python scripts/prepare_data.py --dataset lfw --num-identities 10
 ### 运行前自检
 
 ```bash
-python scripts/make_synthetic_data.py --out-dir data   # 生成程序绘制的卡通测试图
-python src/face_compare.py --data-dir data             # 跑通流程
+# 用 matplotlib 自带的公有领域示例图生成测试图（不下载、不入库）
+python scripts/make_synthetic_data.py --out-dir data --mode sample
+
+# 或用程序绘制的纯卡通脸（完全由代码生成，零外部素材）
+python scripts/make_synthetic_data.py --out-dir data --mode synthetic
+
+python src/face_compare.py --data-dir data     # 跑通流程
 ```
 
-`make_synthetic_data.py` 用 OpenCV 基本图形**程序化绘制**卡通人脸，
-不含任何真实人物、可安全用于 CI 与流程自检。
+| 模式 | 素材来源 | 说明 |
+|:---|:---|:---|
+| `sample` | matplotlib 自带示例图（Grace Hopper，美国海军部公有领域照片） | 真实人脸特征，检测模型可稳定检出，能跑通全链路 |
+| `synthetic` | OpenCV 基本图形程序化绘制 | 纯卡通脸，不含任何真实人物；卡通脸通常**无法**被检测模型检出，适合验证「无人脸时优雅报错」路径 |
+
+两种模式生成的文件都落在 `data/`（已 gitignore），**不会入库**。
 
 ---
 

@@ -36,11 +36,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: 生成合成测试图
-        # 仓库不含任何真实人脸图像，CI 用合成人脸图做冒烟测试，
-        # 验证流水线可跑通、缺图时不崩溃、报告结构正确。
+      - name: 生成测试图
+        # 仓库不含任何真实人脸图像。CI 使用 matplotlib 自带的公有领域示例图
+        # （Grace Hopper，美国海军部公有领域照片），临时生成到 data/（已 gitignore），
+        # 不下载、不入库。--mode synthetic 可切换为程序绘制的纯卡通脸。
         run: |
-          python scripts/make_synthetic_data.py --out-dir data
+          python scripts/make_synthetic_data.py --out-dir data --mode sample
       - name: 数据结构自检
         run: python scripts/prepare_data.py --check
       - name: 运行比对流水线

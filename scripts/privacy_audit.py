@@ -39,6 +39,24 @@ FORBIDDEN_TEXT_PATTERNS = [
     (r"\bface-match-lab/samples\b", "已废弃的 samples/ 目录引用"),
 ]
 
+#: 审计脚本自身：其中必然包含模式定义（FORBIDDEN_TEXT_PATTERNS），
+#: 扫描时需排除这些「定义行」，否则会自我误报。
+SELF_REL = os.path.relpath(__file__, ROOT).replace(os.sep, "/")
+
+
+def _matches_forbidden(text: str, rel: str) -> list[str]:
+    """返回命中的描述列表；对审计脚本自身跳过模式定义行。"""
+    descs = []
+    for pattern, desc in FORBIDDEN_TEXT_PATTERNS:
+        for line in text.splitlines():
+            if rel == SELF_REL and ("FORBIDDEN_TEXT_PATTERNS" in line
+                                    or re.search(r'\(r?"', line)):
+                continue          # 定义行本身，非实际引用
+            if re.search(pattern, line):
+                descs.append(desc)
+                break
+    return descs
+
 
 def git(*args) -> str:
     return subprocess.run(["git", "-C", ROOT, *args],
@@ -60,71 +78,93 @@ def l1_history_images() -> list[str]:
 
 
 def l2_worktree_images() -> list[str]:
-    """L2：工作树中的图像文件（排除 .git 与允许清单）。"""
+    """L2：**会被提交**的文件中是否存在图像文件（允许清单除外）。
+
+    注意：不能直接扫工作树 —— ``data/`` 与 ``results/`` 本就被
+    ``.gitignore`` 排除，里面的图像是正常的运行时产物。
+    这里以 ``git ls-files``（已跟踪文件）+ ``git status``（未跟踪且
+    未被忽略的文件）为准，只检查真正会进入版本库的内容。
+    """
     hits = []
-    for dirpath, dirnames, filenames in os.walk(ROOT):
-        if ".git" in dirnames:
-            dirnames.remove(".git")
-        for name in filenames:
-            if not name.lower().endswith(IMAGE_EXT):
-                continue
-            rel = os.path.relpath(os.path.join(dirpath, name), ROOT).replace(os.sep, "/")
-            if rel in ALLOWED_IMAGES:
-                continue
+    tracked = git("ls-files").splitlines()
+    for rel in tracked:
+        if rel.lower().endswith(IMAGE_EXT) and rel not in ALLOWED_IMAGES:
             hits.append(rel)
-    return sorted(hits)
+
+    # 未跟踪但未被忽略的文件（git status --porcelain 输出以 ?? 开头）
+    for line in git("status", "--porcelain", "--untracked-files=all").splitlines():
+        if not line.startswith("?? "):
+            continue
+        rel = line[3:].strip().strip('"')
+        if rel.lower().endswith(IMAGE_EXT) and rel not in ALLOWED_IMAGES:
+            hits.append(rel)
+    return sorted(set(hits))
 
 
 def l3_text_scan() -> list[tuple[str, str]]:
-    """L3：文本文件中的禁止模式（审计脚本自身除外——它必然包含模式定义）。"""
+    """L3：会被提交的文本文件中的禁止模式。
+
+    只检查已跟踪文件与未忽略的新增文件 —— ``data/`` 下的说明文件
+    属于使用者本地目录，不构成仓库泄露。
+    """
     hits = []
     exts = (".py", ".md", ".yml", ".yaml", ".txt", ".json", ".cfg", ".toml", ".in")
-    self_rel = os.path.relpath(__file__, ROOT).replace(os.sep, "/")
-    for dirpath, dirnames, filenames in os.walk(ROOT):
-        if ".git" in dirnames:
-            dirnames.remove(".git")
-        for name in filenames:
-            if not name.endswith(exts):
-                continue
-            path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
-            if rel == self_rel:
-                continue          # 本脚本包含模式定义本身，属预期
-            try:
-                text = open(path, encoding="utf-8", errors="ignore").read()
-            except OSError:
-                continue
-            for pattern, desc in FORBIDDEN_TEXT_PATTERNS:
-                if re.search(pattern, text):
-                    hits.append((rel, desc))
+    candidates = set(git("ls-files").splitlines())
+    for line in git("status", "--porcelain", "--untracked-files=all").splitlines():
+        if line.startswith("?? "):
+            candidates.add(line[3:].strip().strip('"'))
+
+    for rel in sorted(candidates):
+        if not rel.endswith(exts):
+            continue
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            text = open(path, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for desc in _matches_forbidden(text, rel):
+            hits.append((rel, desc))
     return sorted(set(hits))
 
 
 def l4_report_fields() -> list[tuple[str, str]]:
-    """L4：JSON 报告中的敏感字段。"""
+    """L4：会被提交的 JSON 报告中的敏感字段。"""
     hits = []
-    for dirpath, dirnames, filenames in os.walk(ROOT):
-        if ".git" in dirnames:
-            dirnames.remove(".git")
-        for name in filenames:
-            if not name.endswith(".json"):
-                continue
-            path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
-            text = open(path, encoding="utf-8", errors="ignore").read()
-            for key in FORBIDDEN_JSON_KEYS:
-                if key in text:
-                    hits.append((rel, f"含敏感字段 {key}"))
+    candidates = set(git("ls-files").splitlines())
+    for line in git("status", "--porcelain", "--untracked-files=all").splitlines():
+        if line.startswith("?? "):
+            candidates.add(line[3:].strip().strip('"'))
+    for rel in sorted(candidates):
+        if not rel.endswith(".json"):
+            continue
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        text = open(path, encoding="utf-8", errors="ignore").read()
+        for key in FORBIDDEN_JSON_KEYS:
+            if key in text:
+                hits.append((rel, f"含敏感字段 {key}"))
     return sorted(set(hits))
 
 
 def l5_gitignore_guard() -> list[str]:
     """L5：.gitignore 是否真正拦住了数据目录与图像文件。"""
-    out = git("check-ignore", "-v", "--no-index",
-              "data/group.jpg", "assets/results/x.jpg", "data/person_01/01.jpg")
     problems = []
-    if not out.strip():
-        problems.append("data/ 下的图像未被 .gitignore 拦截")
+    # 用 --no-index 检查尚不存在于索引中的路径是否会被忽略
+    out = git("check-ignore", "-v", "--no-index",
+              "data/group.jpg", "data/person_01/01.jpg",
+              "results/result_group_annotated.jpg", "results/crops/x.jpg")
+    ignored = set()
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            ignored.add(parts[1].strip())
+    for probe in ("data/group.jpg", "data/person_01/01.jpg",
+                  "results/result_group_annotated.jpg", "results/crops/x.jpg"):
+        if probe not in ignored:
+            problems.append(f"{probe} 未被 .gitignore 拦截")
     return problems
 
 
