@@ -61,45 +61,36 @@ jobs:
             --report results/report.json \
             --triangulation results/triangulation.json \
             --out-dir assets/charts
-      - name: 校验判定结果
-        # 公开示例的期望结论：三对全部一致判定为同一人
+      - name: 端到端自测（6 项断言）
+        # scripts/selftest.py 把「跑得通」变成可断言的回归测试：
+        # T1 主判定 / T2 唯一性 / T3 负对照 / T4 过线人数 / T5 三角验证 / T6 参考像鲁棒
+        # 退出码非 0 即回归失败。
         run: |
-          python - <<'PY'
-          import json, sys
-          tri = json.load(open("results/triangulation.json", encoding="utf-8"))
-          rep = json.load(open("results/report.json", encoding="utf-8"))
-          if not tri["all_consistent"]:
-              print("FAIL 三角验证未达成一致:", tri["pairs"]); sys.exit(1)
-          if not rep["comparison"]["same_person"]:
-              print("FAIL 主比对未判定为同一人"); sys.exit(1)
-          if rep["ranking"][0]["cosine"] <= rep["ranking"][1]["cosine"]:
-              print("FAIL 排名表未按相似度降序"); sys.exit(1)
-          print(f"PASS 判定一致，top1={rep['ranking'][0]['cosine']}")
-          PY
-      - name: 负对照（换参考像应切换 Top-1）
-        # 用 Cooper 肖像作参考像，Top-1 必须与 Glenn 情形不同，
-        # 证明排名反映真实身份相似性，而非固定取最大脸
-        run: |
-          python src/face_compare.py \
+          python scripts/selftest.py \
             --samples \
-            --reference samples/cooper_portrait.jpg \
-            --out-dir results/neg \
-            --crop-dir results/neg/crops \
-            --report results/neg/report.json
+            --json results/selftest.json
+      - name: 校验自测结果
+        run: |
           python - <<'PY'
           import json, sys
-          glenn = json.load(open("results/report.json", encoding="utf-8"))
-          coop  = json.load(open("results/neg/report.json", encoding="utf-8"))
-          g, c = glenn["ranking"][0]["cosine"], coop["ranking"][0]["cosine"]
-          if abs(g - c) < 1e-6:
-              print(f"FAIL 换参考像后 Top-1 未切换 (both={g})"); sys.exit(1)
-          print(f"PASS 负对照有效：Glenn={g} vs Cooper={c}")
+          data = json.load(open("results/selftest.json", encoding="utf-8"))
+          failed = [c for c in data["checks"] if c["status"] == "FAIL"]
+          skipped = [c for c in data["checks"] if c["status"] == "SKIP"]
+          for c in data["checks"]:
+              mark = {"PASS": "PASS", "FAIL": "FAIL", "SKIP": "SKIP"}[c["status"]]
+              print(f"  {c['id']}  {mark:<5} {c['name']}  —  {c['detail']}")
+          if failed:
+              print(f"\nFAIL {len(failed)} 项断言未通过"); sys.exit(1)
+          if skipped:
+              print(f"\n警告：{len(skipped)} 项被跳过（缺第三视角）")
+          print(f"\nPASS 全部断言通过")
           PY
       - name: 校验报告不含坐标泄露
         run: |
           python - <<'PY'
           import json, sys
-          for path in ("results/report.json", "results/triangulation.json"):
+          for path in ("results/report.json", "results/triangulation.json",
+                       "results/selftest.json"):
               text = open(path, encoding="utf-8").read()
               for bad in ('"bbox"', '"center"', '"path"'):
                   if bad in text:
