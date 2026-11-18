@@ -21,10 +21,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: 编译检查
-        run: python -m compileall -q src/
+        run: python -m compileall -q src/ scripts/
 
-  run:
-    name: 端到端冒烟测试
+  smoke:
+    name: 端到端冒烟测试（合成数据）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,32 +36,51 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: 生成合成测试图
+        # 仓库不含任何真实人脸图像，CI 用合成人脸图做冒烟测试，
+        # 验证流水线可跑通、缺图时不崩溃、报告结构正确。
+        run: |
+          python scripts/make_synthetic_data.py --out-dir data
+      - name: 数据结构自检
+        run: python scripts/prepare_data.py --check
       - name: 运行比对流水线
         run: |
           python src/face_compare.py \
-            --group samples/group.jpg \
-            --host samples/host.png \
-            --out-dir assets/results \
-            --crop-dir assets/crops \
-            --report assets/results/report.json
+            --data-dir data \
+            --out-dir results \
+            --crop-dir results/crops \
+            --report results/report.json
       - name: 三角验证
         run: |
           python src/triangulate.py \
-            --group samples/group.jpg \
-            --host samples/host.png \
-            --panorama samples/classroom.png \
-            --out-dir assets/results \
-            --report assets/results/triangulation.json
+            --data-dir data \
+            --out-dir results \
+            --report results/triangulation.json
       - name: 生成图表
         run: |
           python src/plot_results.py \
-            --report assets/results/report.json \
-            --triangulation assets/results/triangulation.json \
+            --report results/report.json \
+            --triangulation results/triangulation.json \
             --out-dir assets/charts
+      - name: 校验报告不含坐标泄露
+        run: |
+          python - <<'PY'
+          import json, sys
+          for path in ("results/report.json", "results/triangulation.json"):
+              text = open(path, encoding="utf-8").read()
+              for bad in ('"bbox"', '"center"', '"path"'):
+                  if bad in text:
+                      print(f"FAIL {path}: 仍包含敏感字段 {bad}")
+                      sys.exit(1)
+              json.loads(text)
+          print("PASS 报告结构校验通过，无坐标泄露")
+          PY
+      - name: 隐私终审体检
+        run: python scripts/privacy_audit.py
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: face-match-lab-results
           path: |
-            assets/results/**
+            results/*.json
             assets/charts/**

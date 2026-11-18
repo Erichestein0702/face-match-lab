@@ -27,8 +27,13 @@ face-compare —— 人脸检测 / 特征提取 / 相似度比对一体化流水
 用法
 ----
     python3 face_compare.py <合照> <讲台照片>
-    python3 face_compare.py --group samples/group.jpg --host samples/classroom.png \
+    python3 face_compare.py --group data/group.jpg --host data/host.png \
                              --report results/report.json
+
+路径配置
+--------
+所有路径均不写死，取值优先级：命令行参数 > 环境变量 > src/config.py 默认值。
+详见 ``python3 config.py`` 或 README「数据准备」章节。
 """
 from __future__ import annotations
 
@@ -86,7 +91,10 @@ _ensure("numpy", "numpy")
 import cv2                                                  # noqa: E402
 import numpy as np                                         # noqa: E402
 
-DEFAULT_MODEL_ROOT = os.path.join(os.path.expanduser("~"), ".cache", "face_models")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config                                              # noqa: E402
+
+DEFAULT_MODEL_ROOT = config.MODEL_ROOT
 MODEL_ROOT = os.environ.get("FACE_MODEL_ROOT") or DEFAULT_MODEL_ROOT
 
 # --------------------------------------------------------------------------- #
@@ -280,6 +288,29 @@ def save_crop(img, bbox, path, pad: float = 0.35) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 报告脱敏
+# --------------------------------------------------------------------------- #
+def anonymize_ranking(ranking):
+    """剥离人脸框坐标，只保留匿名序号与统计量。
+
+    隐私考量：``bbox`` / ``center`` 是像素坐标，一旦与原图同时泄露，
+    即可反推合照中每个人的位置。报告只保留排序后的匿名序号、排位标签
+    与相似度指标，足以完整表达结论且不可还原个体位置。
+    """
+    out = []
+    for i, r in enumerate(ranking, 1):
+        out.append({
+            "index": i,
+            "row": r.get("row", ""),
+            "cosine": r.get("cosine"),
+            "euclidean": r.get("euclidean"),
+            "is_target": bool(r.get("is_target")),
+            "same_person": bool(r.get("same_person")),
+        })
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 主流程
 # --------------------------------------------------------------------------- #
 def run(args):
@@ -288,10 +319,18 @@ def run(args):
 
     img_g = cv2.imread(group_path)
     if img_g is None:
-        sys.exit(f"[error] 无法读取合照: {group_path}")
+        print(f"[error] 无法读取合照: {group_path}")
+        print("\n提示：把照片放进数据目录后重试，结构应为：")
+        print(f"          data/{config.DEFAULT_GROUP_NAME}   （大合照）")
+        print(f"          data/{config.DEFAULT_HOST_NAME}   （讲台特写）")
+        print("        也可用 --group/--host 直接指定路径，")
+        print("        或运行 `python scripts/prepare_data.py --check` 检查数据准备情况。")
+        sys.exit(1)
     img_h = cv2.imread(host_path)
     if img_h is None:
-        sys.exit(f"[error] 无法读取讲台照片: {host_path}")
+        print(f"[error] 无法读取讲台照片: {host_path}")
+        print("\n提示：把照片放进数据目录后重试，或用 --host 直接指定路径。")
+        sys.exit(1)
 
     hg, wg = img_g.shape[:2]
     hh, wh = img_h.shape[:2]
@@ -317,10 +356,14 @@ def run(args):
         target = front[0]
         _, sat, val = white_cloth_check(img_g, target.bbox)
         white_info = (sat, val)
-    if target is None:                                       # 兜底：全图最低人脸
-        target = max(faces_g, key=lambda f: f.center[1]) if faces_g else None
+    if target is None and faces_g:                           # 兜底：全图最低人脸
+        target = max(faces_g, key=lambda f: f.center[1])
     if target is None:
         sys.exit("[error] 合照中未检测到人脸")
+    if white_info is None:
+        # 兜底路径（无第一排人脸）未做白衣判据，此处补测一次，避免 white_info 为 None
+        _, sat, val = white_cloth_check(img_g, target.bbox)
+        white_info = (sat, val)
     print(f"[group] 目标(第一排最右白衣): bbox={target.bbox} 中心={target.center} "
           f"肩部HSV S={white_info[0]:.0f} V={white_info[1]:.0f}")
 
@@ -348,6 +391,7 @@ def run(args):
     print(f"判定结论                    : {'是同一人' if same else '不是同一人'}")
 
     # ---- 4) 遍历合照全部人脸 ----
+    # 内部保留 bbox 供可视化使用；写入 JSON 前会剥离坐标（见 anonymize_ranking）。
     ranking = []
     for f in faces_g:
         c = cosine(f.embedding, host.embedding)
@@ -363,17 +407,15 @@ def run(args):
     ranking.sort(key=lambda r: -r["cosine"])
 
     print(f"\n========== 遍历合照 {len(faces_g)} 张人脸 vs 讲台人物 ==========")
-    print(f"{'排名':<6}{'中心(x,y)':<14}{'排':<8}{'余弦':<10}{'欧氏':<9}{'判定'}")
+    print(f"{'排名':<6}{'排位':<8}{'余弦':<10}{'欧氏':<9}{'判定'}")
     for rank, r in enumerate(ranking, 1):
         mark = "  <== 目标(第一排最右白衣)" if r["is_target"] else ""
-        print(f"{rank:<6}({int(r['center'][0])},{int(r['center'][1])})".ljust(20)
-              + f"{r['row']:<8}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
+        print(f"#{rank:<5}{r['row']:<8}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
               f"{'是' if r['same_person'] else '否'}{mark}")
 
     best = ranking[0]
     save_crop(img_g, best["bbox"], os.path.join(args.crop_dir, "best_match_group.jpg"))
-    print(f"\n最佳匹配: 排名1 中心=({int(best['center'][0])},{int(best['center'][1])}) "
-          f"{best['row']}, 余弦={best['cosine']:.4f}, "
+    print(f"\n最佳匹配: 排名1 ({best['row']}), 余弦={best['cosine']:.4f}, "
           f"置信度={confidence_pct(best['cosine'], thr):.2f}%")
 
     # ---- 5) 可视化 ----
@@ -397,23 +439,29 @@ def run(args):
     print(f"\n[save] 标注图: {out_g} , {out_h}")
 
     # ---- 6) JSON 报告 ----
+    # 隐私约定：报告中**不写入**人脸框坐标与原始图片路径。
+    # 坐标若与原图同时泄露，可反推出合照中每个人的位置；
+    # 保留相似度/判定等统计量即可完整表达结论。
     report = {
         "backend": BACKEND,
         "embedding_dim": dim,
         "threshold": {"cosine": thr, "euclidean_max": round(math.sqrt(2 * (1 - thr)), 4)},
-        "group_image": {"path": group_path, "size": [wg, hg], "faces_detected": len(faces_g)},
-        "host_image": {"path": host_path, "size": [wh, hh], "faces_detected": len(faces_h)},
-        "target": {"bbox": target.bbox, "center": [round(v, 1) for v in target.center],
+        "source": {
+            "group": {"faces_detected": len(faces_g), "size": [wg, hg]},
+            "host": {"faces_detected": len(faces_h), "size": [wh, hh]},
+        },
+        "target": {"row": row_label(target.center[1], hg),
                    "shoulder_hsv": {"saturation": round(white_info[0], 1),
                                     "value": round(white_info[1], 1)}},
-        "host": {"bbox": host.bbox, "center": [round(v, 1) for v in host.center]},
         "comparison": {
             "euclidean_distance": round(dist, 4),
             "cosine_similarity": round(cos, 4),
             "confidence_pct": round(confidence_pct(cos, thr), 2),
             "same_person": same,
         },
-        "ranking": ranking,
+        "ranking": anonymize_ranking(ranking),
+        "privacy_note": "本报告已移除人脸框坐标与原始图片路径；"
+                        "ranking.index 为按相似度排序后的匿名序号。",
     }
     if args.report:
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
@@ -428,19 +476,34 @@ def main():
     parser = argparse.ArgumentParser(
         description="人脸检测 / 特征提取 / 相似度比对",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="路径优先级：命令行 > 环境变量 > src/config.py 默认值。"
+               "运行 `python src/config.py` 查看当前生效配置。",
     )
-    parser.add_argument("group", nargs="?", default="samples/group.jpg", help="大合照路径")
-    parser.add_argument("host", nargs="?", default="samples/host.png", help="讲台特写照片路径")
+    parser.add_argument("group", nargs="?", default=None, help="大合照路径")
+    parser.add_argument("host", nargs="?", default=None, help="讲台特写照片路径")
     parser.add_argument("--group", dest="group_opt", help="大合照路径（覆盖位置参数）")
     parser.add_argument("--host", dest="host_opt", help="讲台照片路径（覆盖位置参数）")
-    parser.add_argument("--out-dir", default="results", help="标注图输出目录")
-    parser.add_argument("--crop-dir", default="results/crops", help="人脸裁剪图输出目录")
-    parser.add_argument("--report", default="results/report.json", help="JSON 报告输出路径")
+    parser.add_argument("--data-dir", default=None,
+                        help=f"数据目录（默认 {config.DATA_DIR}）")
+    parser.add_argument("--out-dir", default=None,
+                        help=f"标注图输出目录（默认 {config.OUT_DIR}）")
+    parser.add_argument("--crop-dir", default=None,
+                        help=f"人脸裁剪图输出目录（默认 {config.CROP_DIR}）")
+    parser.add_argument("--report", default=None,
+                        help=f"JSON 报告输出路径（默认 {config.REPORT}）")
     args = parser.parse_args()
-    args.group = args.group_opt or args.group
-    args.host = args.host_opt or args.host
+
+    # --- 解析生效路径（命令行 > 环境变量 > 默认值） ---
+    data_dir = config.resolve_dir(args.data_dir, config.DATA_DIR)
+    args.group = args.group_opt or args.group or config.default_input(data_dir)
+    args.host = args.host_opt or args.host or config.default_input(data_dir, config.DEFAULT_HOST_NAME)
+    args.out_dir = config.resolve_dir(args.out_dir, config.OUT_DIR)
+    args.crop_dir = config.resolve_dir(args.crop_dir, config.CROP_DIR)
+    args.report = config.resolve_dir(args.report, config.REPORT)
 
     print(f"[init] 主后端: {'insightface ArcFace (512维)' if BACKEND == 'ArcFace' else 'OpenCV SFace (128维, 降级模式)'}")
+    print(f"[path] 合照: {args.group}")
+    print(f"[path] 讲台: {args.host}")
     run(args)
 
 

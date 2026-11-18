@@ -45,6 +45,24 @@ assets/crops/*
 logs/
 *.log
 
+# 用户数据目录（含真实人脸照片，永不入库）
+# 说明：data/ 下的照片属于生物识别信息，即使仓库公开也不应随仓库分发。
+/data/
+!/data/README.md
+!/data/.gitkeep
+/data/*/
+!/data/README.md
+
+# 兜底：任何形态的图像文件都不入库
+# 说明：assets/charts/*.png 为纯数据图表，已通过 ! 显式保留；
+#       其余图片（标注可视化图、人脸裁剪图、原始照片）一律排除。
+*.jpg
+*.jpeg
+*.bmp
+*.webp
+*.png
+!assets/charts/*.png
+
 # 凭据与敏感信息
 .env
 .env.*

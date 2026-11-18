@@ -27,235 +27,268 @@
   "all_consistent": true,
   "ranking_vs_panorama": [
     {
+      "index": 1,
+      "row": "",
       "cosine": 0.5045,
       "euclidean": 0.9955,
       "is_target": true,
-      "same_person": true,
-      "index": 1
+      "same_person": true
     },
     {
+      "index": 2,
+      "row": "",
       "cosine": 0.2925,
       "euclidean": 1.1895,
       "is_target": false,
-      "same_person": false,
-      "index": 2
+      "same_person": false
     },
     {
+      "index": 3,
+      "row": "",
       "cosine": 0.2313,
       "euclidean": 1.2399,
       "is_target": false,
-      "same_person": false,
-      "index": 3
+      "same_person": false
     },
     {
+      "index": 4,
+      "row": "",
       "cosine": 0.1828,
       "euclidean": 1.2785,
       "is_target": false,
-      "same_person": false,
-      "index": 4
+      "same_person": false
     },
     {
+      "index": 5,
+      "row": "",
       "cosine": 0.1473,
       "euclidean": 1.3059,
       "is_target": false,
-      "same_person": false,
-      "index": 5
+      "same_person": false
     },
     {
+      "index": 6,
+      "row": "",
       "cosine": 0.1473,
       "euclidean": 1.3059,
       "is_target": false,
-      "same_person": false,
-      "index": 6
+      "same_person": false
     },
     {
+      "index": 7,
+      "row": "",
       "cosine": 0.1206,
       "euclidean": 1.3262,
       "is_target": false,
-      "same_person": false,
-      "index": 7
+      "same_person": false
     },
     {
+      "index": 8,
+      "row": "",
       "cosine": 0.1204,
       "euclidean": 1.3263,
       "is_target": false,
-      "same_person": false,
-      "index": 8
+      "same_person": false
     },
     {
+      "index": 9,
+      "row": "",
       "cosine": 0.119,
       "euclidean": 1.3274,
       "is_target": false,
-      "same_person": false,
-      "index": 9
+      "same_person": false
     },
     {
+      "index": 10,
+      "row": "",
       "cosine": 0.0927,
       "euclidean": 1.3471,
       "is_target": false,
-      "same_person": false,
-      "index": 10
+      "same_person": false
     },
     {
+      "index": 11,
+      "row": "",
       "cosine": 0.0888,
       "euclidean": 1.3499,
       "is_target": false,
-      "same_person": false,
-      "index": 11
+      "same_person": false
     },
     {
+      "index": 12,
+      "row": "",
       "cosine": 0.0851,
       "euclidean": 1.3527,
       "is_target": false,
-      "same_person": false,
-      "index": 12
+      "same_person": false
     },
     {
+      "index": 13,
+      "row": "",
       "cosine": 0.0811,
       "euclidean": 1.3556,
       "is_target": false,
-      "same_person": false,
-      "index": 13
+      "same_person": false
     },
     {
+      "index": 14,
+      "row": "",
       "cosine": 0.0801,
       "euclidean": 1.3564,
       "is_target": false,
-      "same_person": false,
-      "index": 14
+      "same_person": false
     },
     {
+      "index": 15,
+      "row": "",
       "cosine": 0.0722,
       "euclidean": 1.3622,
       "is_target": false,
-      "same_person": false,
-      "index": 15
+      "same_person": false
     },
     {
+      "index": 16,
+      "row": "",
       "cosine": 0.0683,
       "euclidean": 1.365,
       "is_target": false,
-      "same_person": false,
-      "index": 16
+      "same_person": false
     },
     {
+      "index": 17,
+      "row": "",
       "cosine": 0.0442,
       "euclidean": 1.3826,
       "is_target": false,
-      "same_person": false,
-      "index": 17
+      "same_person": false
     },
     {
+      "index": 18,
+      "row": "",
       "cosine": 0.0424,
       "euclidean": 1.3839,
       "is_target": false,
-      "same_person": false,
-      "index": 18
+      "same_person": false
     },
     {
+      "index": 19,
+      "row": "",
       "cosine": 0.0316,
       "euclidean": 1.3917,
       "is_target": false,
-      "same_person": false,
-      "index": 19
+      "same_person": false
     },
     {
+      "index": 20,
+      "row": "",
       "cosine": 0.0242,
       "euclidean": 1.397,
       "is_target": false,
-      "same_person": false,
-      "index": 20
+      "same_person": false
     },
     {
+      "index": 21,
+      "row": "",
       "cosine": 0.0032,
       "euclidean": 1.4119,
       "is_target": false,
-      "same_person": false,
-      "index": 21
+      "same_person": false
     },
     {
+      "index": 22,
+      "row": "",
       "cosine": -0.0018,
       "euclidean": 1.4155,
       "is_target": false,
-      "same_person": false,
-      "index": 22
+      "same_person": false
     },
     {
+      "index": 23,
+      "row": "",
       "cosine": -0.0068,
       "euclidean": 1.419,
       "is_target": false,
-      "same_person": false,
-      "index": 23
+      "same_person": false
     },
     {
+      "index": 24,
+      "row": "",
       "cosine": -0.0145,
       "euclidean": 1.4244,
       "is_target": false,
-      "same_person": false,
-      "index": 24
+      "same_person": false
     },
     {
+      "index": 25,
+      "row": "",
       "cosine": -0.0191,
       "euclidean": 1.4277,
       "is_target": false,
-      "same_person": false,
-      "index": 25
+      "same_person": false
     },
     {
+      "index": 26,
+      "row": "",
       "cosine": -0.0264,
       "euclidean": 1.4327,
       "is_target": false,
-      "same_person": false,
-      "index": 26
+      "same_person": false
     },
     {
+      "index": 27,
+      "row": "",
       "cosine": -0.0274,
       "euclidean": 1.4335,
       "is_target": false,
-      "same_person": false,
-      "index": 27
+      "same_person": false
     },
     {
+      "index": 28,
+      "row": "",
       "cosine": -0.0383,
       "euclidean": 1.441,
       "is_target": false,
-      "same_person": false,
-      "index": 28
+      "same_person": false
     },
     {
+      "index": 29,
+      "row": "",
       "cosine": -0.0432,
       "euclidean": 1.4444,
       "is_target": false,
-      "same_person": false,
-      "index": 29
+      "same_person": false
     },
     {
+      "index": 30,
+      "row": "",
       "cosine": -0.0452,
       "euclidean": 1.4458,
       "is_target": false,
-      "same_person": false,
-      "index": 30
+      "same_person": false
     },
     {
+      "index": 31,
+      "row": "",
       "cosine": -0.0684,
       "euclidean": 1.4618,
       "is_target": false,
-      "same_person": false,
-      "index": 31
+      "same_person": false
     },
     {
+      "index": 32,
+      "row": "",
       "cosine": -0.1087,
       "euclidean": 1.4891,
       "is_target": false,
-      "same_person": false,
-      "index": 32
+      "same_person": false
     },
     {
+      "index": 33,
+      "row": "",
       "cosine": -0.1169,
       "euclidean": 1.4946,
       "is_target": false,
-      "same_person": false,
-      "index": 33
+      "same_person": false
     }
   ],
   "privacy_note": "本报告已移除人脸框坐标与原始图片路径；index 为按相似度排序后的匿名序号。"

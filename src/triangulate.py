@@ -26,8 +26,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from face_compare import (                                          # noqa: E402
     COS_THR_ARCFACE, BACKEND, detect_faces, cosine, euclidean,
-    resolve_source, white_cloth_check,
+    resolve_source, white_cloth_check, anonymize_ranking,
 )
+import config                                                      # noqa: E402
 
 THR = COS_THR_ARCFACE if BACKEND == "ArcFace" else 0.363
 
@@ -52,19 +53,45 @@ def pair(a: dict, b: dict, label: str) -> dict:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="三图三角验证")
-    ap.add_argument("--group", default="samples/group.jpg", help="大合照")
-    ap.add_argument("--host", default="samples/host.png", help="讲台特写")
-    ap.add_argument("--panorama", default="samples/classroom.png", help="教室全景")
-    ap.add_argument("--out-dir", default="results", help="输出目录")
-    ap.add_argument("--report", default="results/triangulation.json", help="JSON 输出")
+    ap = argparse.ArgumentParser(
+        description="三图三角验证",
+        epilog="路径优先级：命令行 > 环境变量 > src/config.py 默认值。",
+    )
+    ap.add_argument("--group", default=None, help="大合照")
+    ap.add_argument("--host", default=None, help="讲台特写")
+    ap.add_argument("--panorama", default=None, help="教室全景")
+    ap.add_argument("--data-dir", default=None, help=f"数据目录（默认 {config.DATA_DIR}）")
+    ap.add_argument("--out-dir", default=None, help=f"输出目录（默认 {config.OUT_DIR}）")
+    ap.add_argument("--report", default=None, help=f"JSON 输出（默认 {config.TRI_REPORT}）")
     args = ap.parse_args()
+
+    data_dir = config.resolve_dir(args.data_dir, config.DATA_DIR)
+    args.group = args.group or config.default_input(data_dir)
+    args.host = args.host or config.default_input(data_dir, config.DEFAULT_HOST_NAME)
+    args.panorama = args.panorama or config.default_input(data_dir, config.DEFAULT_PANORAMA_NAME)
+    args.out_dir = config.resolve_dir(args.out_dir, config.OUT_DIR)
+    args.report = config.resolve_dir(args.report, config.TRI_REPORT)
+
+    print(f"[path] 合照  : {args.group}")
+    print(f"[path] 讲台  : {args.host}")
+    print(f"[path] 全景  : {args.panorama}")
 
     img_g = cv2.imread(resolve_source(args.group))
     img_c = cv2.imread(resolve_source(args.host))
     img_p = cv2.imread(resolve_source(args.panorama))
-    if img_g is None or img_c is None or img_p is None:
-        sys.exit("[error] 图片读取失败")
+    missing = [p for p, im in ((args.group, img_g), (args.host, img_c),
+                               (args.panorama, img_p)) if im is None]
+    if missing:
+        print("[error] 以下图片无法读取：")
+        for p in missing:
+            print(f"          - {p}")
+        print("\n提示：把照片放进数据目录后重试，结构应为：")
+        print(f"          data/{config.DEFAULT_GROUP_NAME}      （大合照）")
+        print(f"          data/{config.DEFAULT_HOST_NAME}       （讲台特写）")
+        print(f"          data/{config.DEFAULT_PANORAMA_NAME}   （教室全景）")
+        print("        也可用 --group/--host/--panorama 直接指定路径，")
+        print("        或运行 `python scripts/prepare_data.py --check` 检查数据准备情况。")
+        sys.exit(1)
 
     hg, _ = img_g.shape[:2]
     hc, _ = img_c.shape[:2]
@@ -86,7 +113,12 @@ def main():
             print(f"A 合照目标: bbox={f.bbox} 肩部HSV S={sat:.0f} V={val:.0f} (白衣 ✓)")
             break
     if tgt is None:
-        tgt = front[0] if front else max(dg, key=lambda f: f.center[1])
+        if front:
+            tgt = front[0]
+        elif dg:
+            tgt = max(dg, key=lambda f: f.center[1])
+        else:
+            sys.exit("[error] 合照中未检测到人脸")
 
     # --- B: 讲台特写主持人（排除前景观众头顶后取最大脸） ---
     cands = [f for f in dc if f.center[1] < 0.85 * hc] or dc
@@ -124,11 +156,10 @@ def main():
                         "is_target": f is tgt, "same_person": c >= THR})
     ranking.sort(key=lambda r: -r["cosine"])
     print(f"\n========== 合照 {len(dg)} 张人脸 vs 全景主持人（C）==========")
-    print(f"{'排名':<6}{'中心(x,y)':<14}{'余弦':<10}{'欧氏':<9}{'判定'}")
+    print(f"{'排名':<6}{'余弦':<10}{'欧氏':<9}{'判定'}")
     for rank, r in enumerate(ranking, 1):
         mark = "  <== 目标" if r["is_target"] else ""
-        print(f"{rank:<6}({int(r['center'][0])},{int(r['center'][1])})".ljust(20)
-              + f"{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
+        print(f"#{rank:<5}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
               f"{'是' if r['same_person'] else '否'}{mark}")
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -145,7 +176,10 @@ def main():
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
         with open(args.report, "w", encoding="utf-8") as fh:
             json.dump({"backend": BACKEND, "threshold": THR, "pairs": pairs,
-                       "all_consistent": all_same, "ranking_vs_panorama": ranking},
+                       "all_consistent": all_same,
+                       "ranking_vs_panorama": anonymize_ranking(ranking),
+                       "privacy_note": "本报告已移除人脸框坐标与原始图片路径；"
+                                       "index 为按相似度排序后的匿名序号。"},
                       fh, ensure_ascii=False, indent=2)
         print(f"[save] {args.report}")
 

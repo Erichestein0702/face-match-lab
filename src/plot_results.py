@@ -13,11 +13,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt          # noqa: E402
 from matplotlib import font_manager      # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config                              # noqa: E402
 
 # ---------------- 配色（深色科技风） ----------------
 BG = "#0f1420"
@@ -54,7 +58,9 @@ def similarity_chart(report, out_path):
     ranking = report["ranking"]
     thr = report["threshold"]["cosine"]
     values = [r["cosine"] for r in ranking]
-    labels = [f"#{i+1} ({int(r['center'][0])},{int(r['center'][1])})" for i, r in enumerate(ranking)]
+    # 纵轴标签只用匿名序号 + 排位，不含任何像素坐标（隐私要求）
+    labels = [f"#{r.get('index', i+1)} {r.get('row', '')}".strip()
+              for i, r in enumerate(ranking)]
 
     fig, ax = plt.subplots(figsize=(11, 6.4), facecolor=BG)
     style_axes(ax)
@@ -97,7 +103,7 @@ def similarity_chart(report, out_path):
 
     fig.text(0.012, 0.015,
              f"backend={report['backend']}  ·  dim={report['embedding_dim']}  ·  "
-             f"faces={report['group_image']['faces_detected']}  ·  "
+             f"faces={report.get('source', {}).get('group', {}).get('faces_detected', len(ranking))}  ·  "
              f"top1 cosine={values[0]:.4f}  ·  结论："
              f"{'同一人' if report['comparison']['same_person'] else '非同一人'}",
              color=MUTED, fontsize=8.5)
@@ -143,26 +149,42 @@ def confidence_bars(tri, out_path):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="生成结果可视化图表")
-    ap.add_argument("--report", default="results/report.json")
-    ap.add_argument("--triangulation", default="results/triangulation.json")
-    ap.add_argument("--out-dir", default="assets/charts")
+    ap = argparse.ArgumentParser(
+        description="生成结果可视化图表",
+        epilog="路径优先级：命令行 > 环境变量 > src/config.py 默认值。",
+    )
+    ap.add_argument("--report", default=None,
+                    help=f"主 JSON 报告（默认 {config.REPORT}）")
+    ap.add_argument("--triangulation", default=None,
+                    help=f"三角验证 JSON 报告（默认 {config.TRI_REPORT}）")
+    ap.add_argument("--out-dir", default=None,
+                    help=f"图表输出目录（默认 {config.CHART_DIR}）")
     args = ap.parse_args()
+
+    report_path = config.resolve_dir(args.report, config.REPORT)
+    tri_path = config.resolve_dir(args.triangulation, config.TRI_REPORT)
+    out_dir = config.resolve_dir(args.out_dir, config.CHART_DIR)
 
     font = pick_font()
     plt.rcParams["font.family"] = font
     plt.rcParams["axes.unicode_minus"] = False
     print(f"[font] 使用字体: {font}")
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    with open(args.report, encoding="utf-8") as fh:
+    os.makedirs(out_dir, exist_ok=True)
+    if not os.path.exists(report_path):
+        print(f"[error] 找不到主报告: {report_path}")
+        print("        请先运行 `python src/face_compare.py` 生成报告。")
+        sys.exit(1)
+    with open(report_path, encoding="utf-8") as fh:
         report = json.load(fh)
-    similarity_chart(report, os.path.join(args.out_dir, "similarity_chart.png"))
+    similarity_chart(report, os.path.join(out_dir, "similarity_chart.png"))
 
-    if os.path.exists(args.triangulation):
-        with open(args.triangulation, encoding="utf-8") as fh:
+    if os.path.exists(tri_path):
+        with open(tri_path, encoding="utf-8") as fh:
             tri = json.load(fh)
-        confidence_bars(tri, os.path.join(args.out_dir, "confidence_bars.png"))
+        confidence_bars(tri, os.path.join(out_dir, "confidence_bars.png"))
+    else:
+        print(f"[skip] 未找到三角验证报告，跳过 confidence_bars.png（{tri_path}）")
 
 
 if __name__ == "__main__":

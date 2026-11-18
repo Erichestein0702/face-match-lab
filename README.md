@@ -32,7 +32,9 @@
 
 ## 🎯 实测结论
 
-> 输入：`samples/group.jpg`（1684×1080 合照）+ `samples/host.png`（1267×951 讲台特写）
+> **数据说明**：以下数值由作者本地自采照片计算得出，**该组照片已从本仓库移除**（含全部 git 历史）。
+> 仓库不含任何真实人脸图像，也未附带可复现该组数值的测试集。
+> 数值仅用于说明算法表现与阈值量级，**不代表公开数据集上的基准成绩**。
 
 | 指标 | 数值 | 说明 |
 |:---|---:|:---|
@@ -61,9 +63,70 @@ Top-1 即目标本人（0.5715），第 2 名仅 0.3172，**与阈值 0.40 差�
 
 ### 标注可视化
 
-| 合照（绿框 = 目标本人） | 讲台特写 | 教室全景 |
-|:---:|:---:|:---:|
-| ![合照标注](assets/results/result_group_annotated.jpg) | ![讲台标注](assets/results/result_host_annotated.jpg) | ![全景标注](assets/results/result_panorama_annotated.jpg) |
+> ⚠️ **本仓库不再包含标注可视化图**。原图与标注图均含可识别的真实人脸，
+> 已随隐私清理一并从 git 历史中移除。运行流水线后，标注图会生成到本地
+> `results/` 目录（已 gitignore），**不会**进入版本库。
+
+---
+
+## 📦 数据准备
+
+> 🔒 **隐私原则**：本仓库**不提供、不接受**任何真实人脸照片。
+> 照片属于生物识别信息，必须由使用者自行准备、放在本地 `data/` 目录，
+> 该目录已被 `.gitignore` 排除，**永远不会进入 git 历史**。
+
+### 目录结构
+
+```
+data/                          # 本地数据目录（已 gitignore，永不入库）
+├── group.jpg                 # 大合照（多人）—— 遍历排名的输入
+├── host.png                  # 讲台特写 —— 单目标比对的输入
+├── classroom.png             # 教室全景 —— 三角验证的第三张
+└── <人名>/                   # 单人人脸样本库（可选，供检索 / 复现）
+    ├── 01.jpg
+    └── 02.jpg
+```
+
+### 三步准备
+
+```bash
+# 1) 生成目录骨架与说明文件（纯文本，不含任何图像）
+python scripts/prepare_data.py --template
+
+# 2) 把你已获授权的照片按上述结构放进 data/
+#    目录名建议用代号（如 person_01），避免在报告中暴露真实姓名
+
+# 3) 检查结构是否符合约定
+python scripts/prepare_data.py --check
+```
+
+`--check` 会逐项核对场景图是否齐全、样本库子目录是否有图，并给出修复建议。
+
+### 从公开数据集获取样本
+
+若你没有合适的照片，可用公开数据集先跑通流程：
+
+```bash
+python scripts/prepare_data.py --dataset lfw --num-identities 10
+```
+
+| 数据集 | 说明 | 许可 |
+|:---|:---|:---|
+| `lfw` | Labeled Faces in the Wild | 非商业研究用途 |
+| `olivetti` | AT&T ORL 人脸库 | 学术免费使用 |
+
+下载结果落在 `data/<数据集名>/<人名>/*.jpg`，同样不入库。
+> ⚠️ 公开数据集的图像同样受各自许可约束，商用前请自行确认授权范围。
+
+### 运行前自检
+
+```bash
+python scripts/make_synthetic_data.py --out-dir data   # 生成程序绘制的卡通测试图
+python src/face_compare.py --data-dir data             # 跑通流程
+```
+
+`make_synthetic_data.py` 用 OpenCV 基本图形**程序化绘制**卡通人脸，
+不含任何真实人物、可安全用于 CI 与流程自检。
 
 ---
 
@@ -77,13 +140,14 @@ Top-1 即目标本人（0.5715），第 2 名仅 0.3172，**与阈值 0.40 差�
 git clone https://github.com/Erichestein0702/face-match-lab.git
 cd face-match-lab
 
+# 准备数据（详见上文「数据准备」）
+python scripts/prepare_data.py --check
+
 # 主比对 + 遍历排名 + 标注图 + JSON 报告
-python src/face_compare.py --group samples/group.jpg --host samples/host.png
+python src/face_compare.py --data-dir data
 
 # 三角验证（需要第三张图）
-python src/triangulate.py --group samples/group.jpg \
-                          --host samples/host.png \
-                          --panorama samples/classroom.png
+python src/triangulate.py --data-dir data
 
 # 生成可视化图表
 python src/plot_results.py
@@ -107,7 +171,6 @@ pip install -r requirements.txt
   ```bash
   python src/face_compare.py "https://example.com/group.jpg" "https://example.com/host.jpg"
   ```
-- **零参数模式**：当前目录恰好 2 张图时自动识别（大的当合照，小的当特写）
 - **纯 CPU 可跑**，不需要 GPU
 
 ---
@@ -161,21 +224,27 @@ confidence = 100 / (1 + exp(-12 * (cos_sim - threshold)))
 ```
 face-match-lab/
 ├── src/
-│   ├── face_compare.py      # 主程序：定位 + 特征 + 比对 + 遍历 + 标注 + JSON
-│   ├── triangulate.py       # 三图三角验证
-│   └── plot_results.py      # 由 JSON 报告生成可视化图表
-├── samples/                 # 演示样本（3 张）
-│   ├── group.jpg            # 大合照（1684×1080）
-│   ├── host.png             # 讲台特写（1267×951）
-│   └── classroom.png        # 教室全景（1266×950）
+│   ├── config.py             # 路径与环境变量集中管理（无第三方依赖）
+│   ├── face_compare.py       # 主程序：定位 + 特征 + 比对 + 遍历 + 标注 + JSON
+│   ├── triangulate.py        # 三图三角验证
+│   └── plot_results.py       # 由 JSON 报告生成可视化图表
+├── scripts/
+│   ├── prepare_data.py       # 数据准备：结构检查 / 骨架生成 / 公开数据集下载
+│   ├── make_synthetic_data.py# 生成程序绘制的卡通测试图（不含真实人脸）
+│   └── privacy_audit.py      # 隐私终审体检：五层扫描历史/工作树/文本/报告/忽略规则
+├── data/                     # 用户本地数据目录（已 gitignore，永不入库）
+│   ├── group.jpg             # 大合照
+│   ├── host.png              # 讲台特写
+│   ├── classroom.png         # 教室全景
+│   └── <人名>/*.jpg          # 单人人脸样本库（可选）
 ├── assets/
-│   ├── charts/              # 相似度分布图 / 三角验证条形图
-│   ├── crops/               # 目标人脸裁剪
-│   └── results/             # 标注可视化图
+│   ├── charts/               # 相似度分布图 / 三角验证条形图（纯数据图，不含人脸）
+│   ├── crops/                # 目标人脸裁剪（运行期生成，已 gitignore）
+│   └── results/              # 脱敏后的 JSON 报告
 ├── docs/
-│   └── METHOD.md            # 方法学说明
-├── results/                 # 运行时产物（.gitignore 排除）
-├── .github/workflows/ci.yml # CI：语法检查 + SFace 降级链路冒烟测试
+│   └── METHOD.md             # 方法学说明
+├── results/                  # 运行时产物（已 gitignore）
+├── .github/workflows/ci.yml  # CI：语法检查 + 合成数据冒烟测试 + 报告泄露校验
 ├── requirements.txt
 ├── LICENSE
 └── README.md
@@ -196,14 +265,25 @@ conf = confidence_pct(cos, threshold=0.40)      # 置信度百分比
 
 ---
 
-## ⚙️ 环境变量
+## ⚙️ 路径与环境变量
 
-| 变量 | 作用 | 默认值 |
+**所有路径都不写死在代码里**，优先级为：命令行参数 > 环境变量 > `src/config.py` 默认值。
+
+运行 `python src/config.py` 可查看当前生效的完整配置。
+
+| 环境变量 | 作用 | 默认值 |
 |:---|:---|:---|
+| `FACE_DATA_DIR` | 数据根目录 | `<repo>/data` |
+| `FACE_OUT_DIR` | 标注图 / 报告输出根目录 | `<repo>/results` |
+| `FACE_CROP_DIR` | 人脸裁剪输出目录 | `<repo>/results/crops` |
+| `FACE_REPORT` | 主 JSON 报告路径 | `<repo>/results/report.json` |
+| `FACE_TRI_REPORT` | 三角验证报告路径 | `<repo>/results/triangulation.json` |
+| `FACE_CHART_DIR` | 图表输出目录 | `<repo>/assets/charts` |
 | `FACE_MODEL_ROOT` | 模型缓存目录 | `~/.cache/face_models` |
 | `FACE_NO_ARCFACE` | 设为 `1` 强制降级到 SFace | 未设置 |
-| `FACE_CROP_DIR` | 人脸裁剪输出目录 | `results/crops` |
-| `FACE_OUT_DIR` | 标注图输出目录 | `results` |
+
+对应的命令行参数：`--data-dir` / `--out-dir` / `--crop-dir` / `--report` /
+`--triangulation` / `--group` / `--host` / `--panorama`。
 
 ---
 
@@ -219,16 +299,45 @@ conf = confidence_pct(cos, threshold=0.40)      # 置信度百分比
 - [x] 三图三角验证抗误判
 - [x] 标注可视化图 + 结构化 JSON 报告
 - [x] http(s) 直链输入（手机友好）
-- [x] CI：语法检查 + 降级链路冒烟测试
+- [x] 路径全配置化：命令行 > 环境变量 > 默认值
+- [x] **隐私设计**：报告不含人脸坐标与原始路径，`data/` 全程不入库
+- [x] CI：语法检查 + 合成数据冒烟测试 + 报告泄露自动校验
 - [x] 深色主题可视化图表
 
 ---
 
-## ⚠️ 使用须知
+## 🔒 隐私与合规
+
+本仓库在设计上就把**生物识别信息**的最小暴露作为硬约束：
+
+| 措施 | 说明 |
+|:---|:---|
+| **仓库不含真实人脸** | 原始照片与标注可视化图已从全部 git 历史中移除 |
+| **JSON 报告脱敏** | 不写出人脸框坐标（`bbox`/`center`）与原始图片路径，仅保留相似度等统计量 |
+| **图表匿名化** | 纵轴标签使用匿名序号 + 排位，不含任何像素坐标 |
+| **数据目录不入库** | `data/` 已在 `.gitignore` 中排除；`.gitignore` 另设兜底规则排除一切图像文件 |
+| **CI 自动校验** | 流水线会检查生成的报告是否含 `bbox`/`center`/`path` 字段，命中即失败 |
+| **合成测试数据** | CI 使用程序绘制的卡通脸，不引入任何真实肖像素材 |
+| **可自检** | `python scripts/privacy_audit.py` 五层扫描历史/工作树/文本/报告/忽略规则 |
+
+> 🔍 **自检命令**
+> ```bash
+> python scripts/privacy_audit.py          # 完整体检
+> python scripts/privacy_audit.py --json   # 机器可读
+> ```
+> 扫描层级：L1 全历史图像 blob · L2 工作树图像文件 · L3 文本禁止模式 ·
+> L4 报告敏感字段 · L5 `.gitignore` 兜底拦截。任一层命中即判定未通过。
+
+> ℹ️ **坐标为何必须移除**：人脸框坐标属于「可定位的生物识别信息」。
+> 若原图与坐标同时泄露，即可反推出合照中每个人的位置。
+> 保留相似度、欧氏距离、置信度与判定结论，已足以完整表达算法行为。
+
+### 使用须知
 
 - 本项目用于**技术验证与研究**。人脸识别属于**生物识别信息**处理，请遵守当地法律法规（个人信息保护法 / GDPR 等）。
-- 仓库中的照片仅作**技术演示**用途，涉及的肖像权归原拍摄者与被拍摄者所有。
-- **不要**将其用于未经授权的监控、追踪或身份认定。
+- 使用者放入 `data/` 的照片，须确保**已取得被拍摄者的明确授权**。
+- **不要**将人脸识别技术用于未经授权的监控、追踪或身份认定。
+- 若需展示结果，建议只分享**统计量与图表**（如本仓库 README 所示），不要分享原图。
 
 ---
 

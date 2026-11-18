@@ -2,6 +2,10 @@
 
 本文档说明 `face-match-lab` 使用的算法链路、参数取值及其依据。
 
+> **数据说明**：文中「实测结果」一节的数值由作者本地自采照片计算得出，
+> 该组照片已从本仓库及全部 git 历史中移除。仓库不含可复现该组数值的测试集，
+> 数值仅用于说明算法表现与阈值量级。
+
 ---
 
 ## 1. 总体流程
@@ -148,7 +152,7 @@ confidence = 100 / (1 + exp(-k * (cos - threshold)))      k = 12.0
 
 `src/triangulate.py` 输出：
 
-- `triples` —— 三组两两比对的距离/余弦/置信度/判定
+- `pairs` —— 三组两两比对的距离/余弦/置信度/判定
 - `all_consistent` —— 三组是否全部判定为「同一人」
 - `ranking_vs_panorama` —— 合照中全部人脸与全景目标的相似度排名
 
@@ -166,7 +170,35 @@ confidence = 100 / (1 + exp(-k * (cos - threshold)))      k = 12.0
 
 ---
 
-## 7. 复现性说明
+## 7. 报告结构与隐私处理
+
+JSON 报告在落盘前会经过脱敏处理（`face_compare.anonymize_ranking()`）。
+
+### 保留的字段
+
+| 字段 | 内容 |
+|---|---|
+| `backend` / `embedding_dim` | 后端名称与特征维度 |
+| `threshold` | 余弦阈值及其等价欧氏阈值 |
+| `source` | 检出人脸数、图像尺寸（**不含路径**） |
+| `target` | 目标所在排位、肩部 HSV 统计（**不含坐标**） |
+| `comparison` | 欧氏距离、余弦相似度、置信度、判定结论 |
+| `ranking` | 按相似度排序的匿名序号 + 排位 + 相似度指标 |
+
+### 移除的字段
+
+| 字段 | 移除原因 |
+|---|---|
+| `bbox` / `center` | 人脸框像素坐标。若与原图同时泄露，可反推出合照中每个人的位置 |
+| `path` | 原始图片路径，泄露本地目录结构与文件名 |
+
+坐标在内存中仅用于可视化与裁剪，**不进入任何落盘产物**。
+`src/plot_results.py` 的纵轴标签相应改为「匿名序号 + 排位」，
+不含像素坐标。CI 会自动校验生成的报告不含上述字段。
+
+---
+
+## 8. 复现性说明
 
 | 因素 | 影响 | 控制手段 |
 |---|---|---|
@@ -176,3 +208,24 @@ confidence = 100 / (1 + exp(-k * (cos - threshold)))      k = 12.0
 | 图像缩放 | 影响 embedding 精度 | 检测器内部 letterbox，特征提取对 112×112 对齐 |
 
 同一输入图像 + 同一模型版本下，结果完全可复现（embedding 是确定性函数）。
+
+---
+
+## 9. 数据准备与路径配置
+
+代码中不写死任何用户数据路径。取值优先级：
+
+```
+命令行参数  >  环境变量  >  src/config.py 默认值
+```
+
+| 环境变量 | 作用 | 默认值 |
+|---|---|---|
+| `FACE_DATA_DIR` | 数据根目录 | `<repo>/data` |
+| `FACE_OUT_DIR` | 输出根目录 | `<repo>/results` |
+| `FACE_CROP_DIR` | 裁剪图目录 | `<repo>/results/crops` |
+| `FACE_REPORT` | 主报告路径 | `<repo>/results/report.json` |
+| `FACE_TRI_REPORT` | 三角验证报告路径 | `<repo>/results/triangulation.json` |
+| `FACE_CHART_DIR` | 图表目录 | `<repo>/assets/charts` |
+
+`scripts/prepare_data.py` 负责校验 `data/` 结构，详见 README「数据准备」章节。
