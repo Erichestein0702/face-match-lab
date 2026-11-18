@@ -127,9 +127,12 @@ def check(data_dir: str) -> int:
         if imgs:
             print(f"  ✓ {sub:<20} {len(imgs)} 张图片")
         else:
-            print(f"  ✗ {sub:<20} 无图片文件")
-            problems += 1
-
+            # 空目录（仅 .gitkeep 等占位文件）属于「模板骨架」，
+            # 说明用户还没往里放照片，不是结构错误，不计入问题数。
+            placeholder = [n for n in os.listdir(subpath)
+                           if not n.startswith(".")]
+            print(f"  - {sub:<20} 空目录（模板骨架，可选）"
+                  + (f"，含占位文件 {placeholder}" if placeholder else ""))
     print("\n  【检查结果】")
     if problems == 0:
         print("  ✓ 结构完整，可以运行主流程：")

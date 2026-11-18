@@ -37,8 +37,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: 数据结构自检
-        # 仓库自带的 samples/ 是 NASA 公有领域照片，可直接用于冒烟测试
-        run: python scripts/prepare_data.py --check
+        # CI 直接用仓库自带的 samples/（NASA 公有领域照片），无需用户数据目录。
+        # 先把公开示例复制到 data/ 走一遍标准流程，确认结构与复制逻辑都正常。
+        run: |
+          python scripts/prepare_data.py --use-samples
+          python scripts/prepare_data.py --check
       - name: 运行比对流水线
         run: |
           python src/face_compare.py \
