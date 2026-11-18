@@ -16,12 +16,15 @@ make_synthetic_data —— 生成测试图（**不含任何真实人脸**）
 ``--mode sample``
     使用 matplotlib 自带的**公有领域**示例图
     （Grace Hopper 肖像，美国海军部公有领域照片），
-    拼贴成多脸合照 / 特写 / 全景三张图。
+    拼贴成多脸群像 / 参考像 / 第三视角三张图。
     该图片随 matplotlib 安装包分发，**不下载、不入库**，
     仅在运行本脚本时临时生成到 ``data/``（该目录已 gitignore）。
 
 真实检测模型对公有领域示例图检出稳定，因此 ``--mode sample``
 可以真正跑通「检测 → 特征 → 比对 → 报告 → 图表」全链路。
+
+> 注：仓库已自带 NASA 公有领域示例（``samples/``），
+> 直接 `python src/face_compare.py --samples` 即可，无需本脚本。
 
 用法
 ----
@@ -31,9 +34,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 import cv2
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+import config  # noqa: E402
 
 
 def _draw_face(canvas, cx, cy, w, h, skin=(190, 175, 160)):
@@ -116,7 +123,7 @@ def make_synthetic_single(path, width=1267, height=951):
 
 
 def make_sample_group(path, base):
-    """用公有领域示例图拼贴成多脸「合照」（2×3 网格）。"""
+    """用公有领域示例图拼贴成多脸「群像图」（2×3 网格）。"""
     h, w = base.shape[:2]
     img = np.full((h * 2, w * 3, 3), 225, dtype=np.uint8)
     for r in range(2):
@@ -127,7 +134,7 @@ def make_sample_group(path, base):
 
 
 def make_sample_single(path, base):
-    """用公有领域示例图拼贴成「特写」（主体居中偏右 + 背景小脸）。"""
+    """用公有领域示例图拼贴成「参考像」（主体居中偏右 + 背景小脸）。"""
     h, w = base.shape[:2]
     img = np.full((h, w, 3), 218, dtype=np.uint8)
     small = cv2.resize(base, (w // 3, h // 3))
@@ -142,12 +149,12 @@ def make_sample_single(path, base):
     return img.shape
 
 
-def make_sample_panorama(path, base):
-    """用公有领域示例图拼贴成「全景」（主持人在左上，满足 x/W<0.25）。"""
+def make_sample_third(path, base):
+    """用公有领域示例图拼贴成「第三视角」（同一主体换一种呈现）。"""
     h, w = base.shape[:2]
     img = np.full((h * 2, w * 2, 3), 225, dtype=np.uint8)
     small = cv2.resize(base, (w // 2, h // 2))
-    img[0:h // 2, 0:w // 2] = small                      # 左上：主持人
+    img[0:h // 2, 0:w // 2] = small                      # 左上：主体
     quarter = cv2.resize(base, (w // 4, h // 4))
     for i in range(3):                                   # 下方观众
         x = w // 2 + i * (w // 4)
@@ -165,22 +172,22 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    p_group = os.path.join(args.out_dir, "group.jpg")
-    p_host = os.path.join(args.out_dir, "host.png")
-    p_pano = os.path.join(args.out_dir, "classroom.png")
+    p_group = os.path.join(args.out_dir, config.DEFAULT_GROUP_NAME)
+    p_ref = os.path.join(args.out_dir, config.DEFAULT_REFERENCE_NAME)
+    p_third = os.path.join(args.out_dir, config.DEFAULT_THIRD_NAME)
 
     if args.mode == "sample":
         base = _load_public_sample()
         print(f"[sample] 公有领域示例图 {base.shape}")
-        print(f"[sample] 合照      -> {p_group}  {make_sample_group(p_group, base)}")
-        print(f"[sample] 讲台特写  -> {p_host}   {make_sample_single(p_host, base)}")
-        print(f"[sample] 教室全景  -> {p_pano}   {make_sample_panorama(p_pano, base)}")
+        print(f"[sample] 群像图    -> {p_group}  {make_sample_group(p_group, base)}")
+        print(f"[sample] 参考像    -> {p_ref}   {make_sample_single(p_ref, base)}")
+        print(f"[sample] 第三视角  -> {p_third}  {make_sample_third(p_third, base)}")
         print("\n[sample] 素材为 matplotlib 自带的公有领域照片（Grace Hopper，"
               "美国海军部公有领域），仅临时生成，不入库。")
     else:
-        print(f"[synthetic] 合照      -> {p_group}  {make_synthetic_group(p_group)}")
-        print(f"[synthetic] 讲台特写  -> {p_host}   {make_synthetic_single(p_host)}")
-        print(f"[synthetic] 教室全景  -> {p_pano}   {make_synthetic_single(p_pano)}")
+        print(f"[synthetic] 群像图    -> {p_group}  {make_synthetic_group(p_group)}")
+        print(f"[synthetic] 参考像    -> {p_ref}   {make_synthetic_single(p_ref)}")
+        print(f"[synthetic] 第三视角  -> {p_third}  {make_synthetic_single(p_third)}")
         print("\n[synthetic] 全部为程序绘制的卡通人脸，不含任何真实人物；"
               "卡通脸通常无法被检测模型检出。")
     return 0

@@ -18,6 +18,7 @@ privacy_audit —— face-match-lab 隐私终审体检
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -27,16 +28,40 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tiff")
-#: 允许入库的图像（纯数据图表）
-ALLOWED_IMAGES = ("assets/charts/similarity_chart.png", "assets/charts/confidence_bars.png")
+#: 允许入库的图像（纯数据图表 + NASA 公有领域公开示例）
+ALLOWED_IMAGES = (
+    "assets/charts/similarity_chart.png",
+    "assets/charts/confidence_bars.png",
+    "samples/mercury7_group.jpg",
+    "samples/glenn_portrait.jpg",
+    "samples/glenn_spacesuit.jpg",
+    "samples/cooper_portrait.jpg",
+)
+
+#: 公开示例的 SHA-256 指纹 —— 防止有人把 NASA 素材偷换成私人照片
+#: 重新计算：sha256sum samples/*.jpg
+SAMPLE_SHA256 = {
+    "samples/mercury7_group.jpg":
+        "110fbc442dcce4ae0aa4a6fff510513ae4c6f82b8506eed678b7722c74cc02b8",
+    "samples/glenn_portrait.jpg":
+        "cdd906af1375b8189245046cec481e42f827c081ad22c3cc336fc110cae330ea",
+    "samples/glenn_spacesuit.jpg":
+        "7df27271b632b3ad4044f16e3679dde7857dd7b07dfba6e4350c2d9442e127b3",
+    "samples/cooper_portrait.jpg":
+        "3327e1a5f9396647ef184ef65a85ad55d1b9297c6d3ca5fbafad098a56f7c462",
+}
 
 #: 报告中禁止出现的字段
 FORBIDDEN_JSON_KEYS = ('"bbox"', '"center"', '"path"', '"face_path"', '"image_path"')
 
 #: 文本中禁止出现的模式
+#: 注：``samples/`` 现在是**合法的公开示例目录**（NASA 公有领域照片，已入库），
+#: 因此不再禁止引用；改为禁止引用历史上已删除的**私人**样例目录名。
 FORBIDDEN_TEXT_PATTERNS = [
-    (r"samples/", "已废弃的 samples/ 目录引用"),
-    (r"\bface-match-lab/samples\b", "已废弃的 samples/ 目录引用"),
+    (r"(?<![\w/])samples/group\.jpg", "已删除的私人样例文件引用"),
+    (r"(?<![\w/])samples/host\.", "已删除的私人样例文件引用"),
+    (r"(?<![\w/])samples/classroom\.", "已删除的私人样例文件引用"),
+    (r"face-match-lab/samples/(?!mercury7|glenn|cooper)", "已删除的私人样例文件引用"),
 ]
 
 #: 审计脚本自身：其中必然包含模式定义（FORBIDDEN_TEXT_PATTERNS），
@@ -168,6 +193,32 @@ def l5_gitignore_guard() -> list[str]:
     return problems
 
 
+def l6_sample_integrity() -> list[str]:
+    """L6：公开示例文件的 SHA-256 是否与登记的指纹一致。
+
+    ``samples/`` 里的图像是仓库内**唯一**的真实人脸素材，
+    必须确保它们始终是登记在册的 NASA 公有领域原图，
+    而不会在某次提交中被悄悄替换成私人照片。
+    """
+    problems = []
+    for rel, expected in SAMPLE_SHA256.items():
+        path = os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            problems.append(f"{rel} 缺失")
+            continue
+        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        if digest != expected:
+            problems.append(f"{rel} 指纹不匹配（期望 {expected[:12]}…，实际 {digest[:12]}…）")
+    # 反向检查：samples/ 下不应存在白名单之外的图像
+    samples_dir = os.path.join(ROOT, "samples")
+    if os.path.isdir(samples_dir):
+        for name in sorted(os.listdir(samples_dir)):
+            rel = f"samples/{name}"
+            if name.lower().endswith(IMAGE_EXT) and rel not in SAMPLE_SHA256:
+                problems.append(f"{rel} 未登记指纹")
+    return problems
+
+
 def run_audit() -> dict:
     result = {
         "L1_history_images": l1_history_images(),
@@ -175,10 +226,12 @@ def run_audit() -> dict:
         "L3_text_patterns": l3_text_scan(),
         "L4_report_fields": l4_report_fields(),
         "L5_ignore_guard": l5_gitignore_guard(),
+        "L6_sample_integrity": l6_sample_integrity(),
     }
     result["passed"] = not any(
         result[k] for k in ("L1_history_images", "L2_worktree_images",
-                            "L3_text_patterns", "L4_report_fields", "L5_ignore_guard")
+                            "L3_text_patterns", "L4_report_fields",
+                            "L5_ignore_guard", "L6_sample_integrity")
     )
     return result
 
@@ -214,6 +267,7 @@ def main():
     n += section("L4 报告敏感字段", res["L4_report_fields"],
                  lambda x: f"{x[0]} — {x[1]}")
     n += section("L5 .gitignore 兜底", res["L5_ignore_guard"])
+    n += section("L6 公开示例指纹", res["L6_sample_integrity"])
 
     print("\n" + "=" * 66)
     if res["passed"]:

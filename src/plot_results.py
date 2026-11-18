@@ -58,8 +58,8 @@ def similarity_chart(report, out_path):
     ranking = report["ranking"]
     thr = report["threshold"]["cosine"]
     values = [r["cosine"] for r in ranking]
-    # 纵轴标签只用匿名序号 + 排位，不含任何像素坐标（隐私要求）
-    labels = [f"#{r.get('index', i+1)} {r.get('row', '')}".strip()
+    # 纵轴标签只用匿名序号 + 位置标签，不含任何像素坐标（隐私要求）
+    labels = [f"#{r.get('index', i+1)} {r.get('position', '')}".strip()
               for i, r in enumerate(ranking)]
 
     fig, ax = plt.subplots(figsize=(11, 6.4), facecolor=BG)
@@ -85,7 +85,7 @@ def similarity_chart(report, out_path):
     ax.invert_yaxis()
     ax.set_xlim(-0.12, max(max(values) * 1.18, thr * 1.4))
     ax.set_xlabel("Cosine Similarity", color=FG, fontsize=11)
-    ax.set_title("合照全部人脸 vs 目标人物 · 相似度分布", color=FG, fontsize=15,
+    ax.set_title("群像图全部人脸 vs 参考像主体 · 相似度分布", color=FG, fontsize=15,
                  fontweight="bold", pad=16)
 
     for i, v in enumerate(values):

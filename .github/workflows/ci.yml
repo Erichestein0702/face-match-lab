@@ -24,7 +24,7 @@ jobs:
         run: python -m compileall -q src/ scripts/
 
   smoke:
-    name: 端到端冒烟测试（合成数据）
+    name: 端到端冒烟测试（公开示例）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,25 +36,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: 生成测试图
-        # 仓库不含任何真实人脸图像。CI 使用 matplotlib 自带的公有领域示例图
-        # （Grace Hopper，美国海军部公有领域照片），临时生成到 data/（已 gitignore），
-        # 不下载、不入库。--mode synthetic 可切换为程序绘制的纯卡通脸。
-        run: |
-          python scripts/make_synthetic_data.py --out-dir data --mode sample
       - name: 数据结构自检
+        # 仓库自带的 samples/ 是 NASA 公有领域照片，可直接用于冒烟测试
         run: python scripts/prepare_data.py --check
       - name: 运行比对流水线
         run: |
           python src/face_compare.py \
-            --data-dir data \
+            --samples \
             --out-dir results \
             --crop-dir results/crops \
             --report results/report.json
       - name: 三角验证
         run: |
           python src/triangulate.py \
-            --data-dir data \
+            --samples \
             --out-dir results \
             --report results/triangulation.json
       - name: 生成图表
@@ -63,6 +58,40 @@ jobs:
             --report results/report.json \
             --triangulation results/triangulation.json \
             --out-dir assets/charts
+      - name: 校验判定结果
+        # 公开示例的期望结论：三对全部一致判定为同一人
+        run: |
+          python - <<'PY'
+          import json, sys
+          tri = json.load(open("results/triangulation.json", encoding="utf-8"))
+          rep = json.load(open("results/report.json", encoding="utf-8"))
+          if not tri["all_consistent"]:
+              print("FAIL 三角验证未达成一致:", tri["pairs"]); sys.exit(1)
+          if not rep["comparison"]["same_person"]:
+              print("FAIL 主比对未判定为同一人"); sys.exit(1)
+          if rep["ranking"][0]["cosine"] <= rep["ranking"][1]["cosine"]:
+              print("FAIL 排名表未按相似度降序"); sys.exit(1)
+          print(f"PASS 判定一致，top1={rep['ranking'][0]['cosine']}")
+          PY
+      - name: 负对照（换参考像应切换 Top-1）
+        # 用 Cooper 肖像作参考像，Top-1 必须与 Glenn 情形不同，
+        # 证明排名反映真实身份相似性，而非固定取最大脸
+        run: |
+          python src/face_compare.py \
+            --samples \
+            --reference samples/cooper_portrait.jpg \
+            --out-dir results/neg \
+            --crop-dir results/neg/crops \
+            --report results/neg/report.json
+          python - <<'PY'
+          import json, sys
+          glenn = json.load(open("results/report.json", encoding="utf-8"))
+          coop  = json.load(open("results/neg/report.json", encoding="utf-8"))
+          g, c = glenn["ranking"][0]["cosine"], coop["ranking"][0]["cosine"]
+          if abs(g - c) < 1e-6:
+              print(f"FAIL 换参考像后 Top-1 未切换 (both={g})"); sys.exit(1)
+          print(f"PASS 负对照有效：Glenn={g} vs Cooper={c}")
+          PY
       - name: 校验报告不含坐标泄露
         run: |
           python - <<'PY'

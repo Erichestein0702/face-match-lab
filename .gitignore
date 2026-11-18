@@ -54,14 +54,16 @@ logs/
 !/data/README.md
 
 # 兜底：任何形态的图像文件都不入库
-# 说明：assets/charts/*.png 为纯数据图表，已通过 ! 显式保留；
-#       其余图片（标注可视化图、人脸裁剪图、原始照片）一律排除。
+# 说明：assets/charts/*.png 为纯数据图表，samples/*.jpg 为 NASA 公有领域公开示例，
+#       均已通过 ! 显式保留；
+#       其余图片（标注可视化图、人脸裁剪图、使用者原始照片）一律排除。
 *.jpg
 *.jpeg
 *.bmp
 *.webp
 *.png
 !assets/charts/*.png
+!samples/*.jpg
 
 # 凭据与敏感信息
 .env

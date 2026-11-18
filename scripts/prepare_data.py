@@ -3,28 +3,31 @@
 """
 prepare_data —— 数据准备与结构校验
 ====================================
-本脚本**不包含、也不产生**任何真实人脸数据。它只做两件事：
+本脚本**不包含、也不产生**任何真实人脸数据。它只做三件事：
 
-1. ``--check``   检查 ``data/`` 目录结构是否符合约定，给出可操作的修复建议
-2. ``--template`` 在 ``data/`` 下生成目录骨架与说明文件（全部为文本，无图像）
-3. ``--dataset``  从公开人脸数据集下载样本到 ``data/``（需用户明确指定）
+1. ``--check``        检查 ``data/`` 目录结构是否符合约定，给出可操作的修复建议
+2. ``--template``     在 ``data/`` 下生成目录骨架与说明文件（全部为文本，无图像）
+3. ``--use-samples``  把仓库自带的公开示例（NASA 公有领域照片）复制到 ``data/``
+4. ``--dataset``      从公开人脸数据集下载样本到 ``data/``（需用户明确指定）
 
 隐私约定
 --------
 * ``data/`` 目录已被 ``.gitignore`` 排除，**永远不会进入 git 历史**
-* 本仓库不提供任何真实人脸样本；使用者需自行放入已获授权的照片
+* 本仓库**只**提供 NASA 公有领域示例照片，不提供任何使用者的真实人脸样本
 * 公开数据集下载仅在用户显式指定 ``--dataset`` 时发生
 
 用法
 ----
     python scripts/prepare_data.py --check
     python scripts/prepare_data.py --template
+    python scripts/prepare_data.py --use-samples
     python scripts/prepare_data.py --dataset lfw --num-identities 10
 """
 from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
@@ -34,9 +37,16 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 #: 顶层三张场景图的期望文件名 -> 用途说明
 SCENE_FILES = {
-    config.DEFAULT_GROUP_NAME: "大合照（多人，用于遍历排名）",
-    config.DEFAULT_HOST_NAME: "讲台特写（用于单目标比对）",
-    config.DEFAULT_PANORAMA_NAME: "教室全景（用于三角验证第三张）",
+    config.DEFAULT_GROUP_NAME: "群像图（多人，用于遍历检索）",
+    config.DEFAULT_REFERENCE_NAME: "参考像（单人，用于比对基准）",
+    config.DEFAULT_THIRD_NAME: "第三视角（可选，用于三角验证）",
+}
+
+#: 仓库自带公开示例 -> data/ 下的目标文件名
+SAMPLE_FILES = {
+    config.SAMPLE_GROUP_NAME: config.DEFAULT_GROUP_NAME,
+    config.SAMPLE_REFERENCE_NAME: config.DEFAULT_REFERENCE_NAME,
+    config.SAMPLE_THIRD_NAME: config.DEFAULT_THIRD_NAME,
 }
 
 README_TEMPLATE = """\
@@ -48,9 +58,9 @@ README_TEMPLATE = """\
 
 ```
 data/
-├── group.jpg          大合照（多人，用于遍历排名）
-├── host.png           讲台特写（用于单目标比对）
-├── classroom.png      教室全景（用于三角验证第三张）
+├── group.jpg          群像图（多人，用于遍历检索）
+├── reference.jpg      参考像（单人，用于比对基准）
+├── third.jpg          第三视角（可选，用于三角验证）
 └── <人名>/            单人人脸样本库（可选，供检索/复现）
     ├── 01.jpg
     └── 02.jpg
@@ -86,7 +96,7 @@ def check(data_dir: str) -> int:
     problems = 0
 
     if not os.path.isdir(data_dir):
-        print(f"  ✗ 目录不存在。可用 `--template` 生成骨架，或手动创建。")
+        print(f"  ✗ 目录不存在。可用 `--template` 生成骨架，或 `--use-samples` 填入公开示例。")
         return 1
 
     print("\n  【场景图】(顶层)")
@@ -96,8 +106,14 @@ def check(data_dir: str) -> int:
             size = os.path.getsize(path)
             print(f"  ✓ {name:<16} {size/1024:8.1f} KB   {desc}")
         else:
-            print(f"  ✗ {name:<16} {'缺失':>10}   {desc}")
-            problems += 1
+            legacy = [old for old, new in config.LEGACY_ALIASES.items()
+                      if new == name and os.path.exists(os.path.join(data_dir, old))]
+            if legacy:
+                print(f"  ! {name:<16} 使用旧名 {legacy[0]}，建议重命名为 {name}")
+                problems += 1
+            else:
+                print(f"  ✗ {name:<16} {'缺失':>10}   {desc}")
+                problems += 1
 
     print("\n  【单人样本库】(data/<人名>/*.jpg)")
     subs = [d for d in sorted(os.listdir(data_dir))
@@ -120,7 +136,7 @@ def check(data_dir: str) -> int:
         print("      python src/face_compare.py")
     else:
         print(f"  发现 {problems} 个问题：")
-        print("      · 补齐缺失的场景图，或用 --group/--host/--panorama 直接指定路径")
+        print("      · 补齐缺失的场景图，或用 --group/--reference/--third 直接指定路径")
         print("      · 目录名建议用代号，避免在报告中暴露真实姓名")
         print("      · 结构确认无误后可忽略（非阻塞项）")
     return problems
@@ -146,6 +162,27 @@ def make_template(data_dir: str) -> int:
         print(f"[template] 已创建 {pdir}/")
     print("\n下一步：把你的照片按上述结构放入 data/，再运行 --check 复核。")
     return 0
+
+
+def use_samples(data_dir: str) -> int:
+    """把仓库自带的公开示例复制到 data/，作为零配置上手素材。"""
+    print(f"[samples] 公开示例目录: {config.SAMPLES_DIR}")
+    os.makedirs(data_dir, exist_ok=True)
+    copied = 0
+    for src_name, dst_name in SAMPLE_FILES.items():
+        src = config.sample(src_name)
+        dst = os.path.join(data_dir, dst_name)
+        if not os.path.exists(src):
+            print(f"  ✗ 缺少示例文件: {src}")
+            continue
+        shutil.copyfile(src, dst)
+        print(f"  ✓ {src_name:<26} -> {dst_name:<14} "
+              f"{os.path.getsize(dst)/1024:7.1f} KB")
+        copied += 1
+    print(f"\n[done] 已复制 {copied} 张公开示例（NASA 公有领域照片）-> {data_dir}")
+    print("       现在可以直接运行：")
+    print("           python src/face_compare.py --data-dir data")
+    return 0 if copied else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -235,12 +272,15 @@ def main():
         epilog="示例:\n"
                "  python scripts/prepare_data.py --check\n"
                "  python scripts/prepare_data.py --template\n"
+               "  python scripts/prepare_data.py --use-samples\n"
                "  python scripts/prepare_data.py --dataset lfw --num-identities 10\n",
     )
     ap.add_argument("--data-dir", default=None,
                     help=f"数据目录（默认 {config.DATA_DIR}）")
     ap.add_argument("--check", action="store_true", help="检查目录结构")
     ap.add_argument("--template", action="store_true", help="生成目录骨架与说明")
+    ap.add_argument("--use-samples", action="store_true",
+                    help="把仓库自带的公开示例复制到数据目录")
     ap.add_argument("--dataset", default=None,
                     choices=sorted(DATASETS), help="从公开数据集下载样本")
     ap.add_argument("--num-identities", type=int, default=10,
@@ -253,6 +293,8 @@ def main():
         return download(args.dataset, data_dir, args.num_identities)
     if args.template:
         return make_template(data_dir)
+    if args.use_samples:
+        return use_samples(data_dir)
     # 默认行为就是 check
     return check(data_dir)
 

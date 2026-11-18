@@ -6,18 +6,39 @@ face-compare —— 人脸检测 / 特征提取 / 相似度比对一体化流水
 
 功能
 ----
-1. 在大合照中定位指定人员（"第一排最右 + 穿白色衣服 + 手持横幅"）
-2. 在讲台照片中定位主持人
-3. 提取 512 维 ArcFace 深度特征
-4. 计算欧氏距离 / 余弦相似度 / 置信度百分比，给出是否同一人判定
-5. 遍历合照中全部人脸，输出匹配排名表（用于"如果不是，请遍历查询其他人"）
-6. 产出标注可视化图与结构化 JSON 报告
+1. 在**群像图**（画面中有多个人）中定位目标人物
+2. 提取 512 维 ArcFace（或 128 维 SFace）深度特征
+3. 计算欧氏距离 / 余弦相似度 / 置信度百分比，给出是否同一人判定
+4. 遍历群像图中全部人脸，输出匹配排名表（用于「如果不是，请遍历查询其他人」）
+5. 产出标注可视化图与结构化 JSON 报告
+
+目标定位策略
+------------
+``--target-strategy`` 决定「群像图里要拿谁去和参考像比对」：
+
+==============  ============================================================
+策略             说明
+==============  ============================================================
+``retrieve``     群像图中与参考像最相似的人（默认，检索型）
+``largest``      画面中面积最大的人脸（几何型）
+``front-right``  画面下半区中最靠右的人脸（几何型，竖排合影场景）
+``white-shirt``  下半区中靠右且肩部为白色衣物的人脸（几何型）
+``index:N``      直接指定群像图中第 N 张人脸（按检测顺序，从 1 开始）
+==============  ============================================================
+
+**检索型 vs 几何型**：
+
+* ``retrieve`` 回答「这群人里有没有这个人」——本工具的核心能力。
+* 其余策略回答「我指认的这个位置的人，是不是这个人」。由于选人时
+  **不看参考像**，判定结果具有独立意义，可用于交叉验证。
+* 所有策略都带兜底：命中失败时退化为「最大人脸 → 唯一人脸」，
+  不会因场景差异而崩溃。
 
 后端
 ----
 * 主后端  insightface `buffalo_l`  = SCRFD 检测器 + ArcFace(w600k_r50) 512 维特征
 * 降级后端  OpenCV Zoo              = YuNet 检测器 + SFace 128 维特征
-  （insightface 在部分平台无预编译 wheel 时自动切换，保证"零配置可跑"）
+  （insightface 在部分平台无预编译 wheel 时自动切换，保证「零配置可跑」）
 
 阈值标准
 --------
@@ -26,9 +47,8 @@ face-compare —— 人脸检测 / 特征提取 / 相似度比对一体化流水
 
 用法
 ----
-    python3 face_compare.py <合照> <讲台照片>
-    python3 face_compare.py --group data/group.jpg --host data/host.png \
-                             --report results/report.json
+    python3 face_compare.py --group data/group.jpg --reference data/reference.jpg
+    python3 face_compare.py --samples            # 直接用仓库自带的公开示例
 
 路径配置
 --------
@@ -51,7 +71,7 @@ import urllib.request
 # 依赖与模型自动准备
 # --------------------------------------------------------------------------- #
 BANNER = r"""
-  ___  _         ___                      __
+  ___ _         ___                      __
  |   \| |__ ___ | _ )___ _ _ _____ __ __ | _ \ ___ _ _
  | |) | '  \(_-< | _ / _ \ '_/ _ \ V  V /  _/ _ \ '_|
  |__/|_|_|_|/__/|___/\___/_| \___/\_/\_/ \___\___/_|
@@ -102,8 +122,7 @@ MODEL_ROOT = os.environ.get("FACE_MODEL_ROOT") or DEFAULT_MODEL_ROOT
 # --------------------------------------------------------------------------- #
 COS_THR_ARCFACE = 0.40          # insightface / ArcFace 常用验证阈值（余弦）
 COS_THR_SFACE = 0.363           # OpenCV Zoo SFace 官方余弦判定阈值
-FRONT_ROW_Y_RATIO = 0.52        # 合照中"第一排"人脸中心 y/H 的经验下界
-HOST_MAX_Y_RATIO = 0.85         # 讲台照中排除前景观众头顶的 y/H 上界
+FRONT_ROW_Y_RATIO = 0.52        # 竖排合影中「下半区」的人脸中心 y/H 下界
 WHITE_MAX_SAT = 70              # 白衣判据：肩部区域平均饱和度上限
 WHITE_MIN_VAL = 140             # 白衣判据：肩部区域平均明度下限
 
@@ -256,12 +275,13 @@ def detect_faces(img):
 
 
 def row_label(cy: float, height: int) -> str:
+    """按人脸中心的相对高度给出粗略的上下位置标签（仅用于报告可读性）。"""
     r = cy / height
     if r > FRONT_ROW_Y_RATIO:
-        return "第一排"
-    if r > 0.44:
-        return "第二排"
-    return "第三排"
+        return "下半区"
+    if r > 0.30:
+        return "中部"
+    return "上半区"
 
 
 def white_cloth_check(img, bbox):
@@ -288,20 +308,88 @@ def save_crop(img, bbox, path, pad: float = 0.35) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 目标定位（通用策略）
+# --------------------------------------------------------------------------- #
+def select_target(faces, img, strategy: str = "retrieve", subject_emb=None):
+    """在群像图中选出要拿去和参考像比对的那张人脸。
+
+    返回 ``(target, info)``；``info`` 记录命中策略与关键判据，便于复盘。
+
+    策略语义分两类：
+
+    * **检索型**（``retrieve``）：目标就是「群像图中与参考像最相似的人」。
+      这回答的是「这群人里有没有这个人」——本工具的核心能力。
+      必须提供 ``subject_emb``（参考像主体的 embedding）。
+    * **几何型**（``largest`` / ``front-right`` / ``white-shirt`` / ``index:N``）：
+      先按**与身份无关**的图像几何特征指定某张脸，再问「这张脸是不是参考像那个人」。
+      这回答的是「我指认的这个位置的人，是不是这个人」。
+      由于选人时不看参考像，判定结果具有独立意义。
+
+    任何策略命中失败都会退化为「最大人脸」，保证流水线不中断。
+    """
+    if not faces:
+        return None, {"strategy": strategy, "matched_by": "none"}
+
+    height = img.shape[0]
+
+    # ---- 检索型：与参考像最相似者 ----
+    if strategy == "retrieve":
+        if subject_emb is None:
+            print("[warn] retrieve 策略需要参考像特征，退化为最大人脸")
+            strategy = "largest"
+        else:
+            target = max(faces, key=lambda f: cosine(f.embedding, subject_emb))
+            return target, {"strategy": "retrieve", "matched_by": "best_match_to_reference"}
+
+    # ---- 显式指定序号 ----
+    if strategy.startswith("index:"):
+        try:
+            idx = int(strategy.split(":", 1)[1])
+        except ValueError:
+            idx = 1
+        if 1 <= idx <= len(faces):
+            return faces[idx - 1], {"strategy": strategy, "matched_by": "explicit_index"}
+        print(f"[warn] index={idx} 超出检测范围（共 {len(faces)} 张），退化为最大人脸")
+        strategy = "largest"
+
+    # ---- 下半区候选（竖排合影场景） ----
+    lower = [f for f in faces if f.center[1] > FRONT_ROW_Y_RATIO * height]
+
+    if strategy == "front-right":
+        pool = lower or faces
+        target = max(pool, key=lambda f: f.center[0])
+        return target, {"strategy": strategy, "matched_by": "rightmost_in_lower_half"}
+
+    if strategy == "white-shirt":
+        pool = sorted(lower or faces, key=lambda f: -f.center[0])
+        for f in pool:
+            ok, sat, val = white_cloth_check(img, f.bbox)
+            if ok:
+                return f, {"strategy": strategy, "matched_by": "white_shoulder",
+                           "shoulder_sat": round(sat, 1), "shoulder_val": round(val, 1)}
+        target = max(pool, key=lambda f: f.center[0])
+        return target, {"strategy": strategy, "matched_by": "fallback_rightmost"}
+
+    # ---- 兜底：最大人脸 ----
+    target = max(faces, key=lambda f: f.area)
+    return target, {"strategy": "largest", "matched_by": "largest_face"}
+
+
+# --------------------------------------------------------------------------- #
 # 报告脱敏
 # --------------------------------------------------------------------------- #
 def anonymize_ranking(ranking):
     """剥离人脸框坐标，只保留匿名序号与统计量。
 
     隐私考量：``bbox`` / ``center`` 是像素坐标，一旦与原图同时泄露，
-    即可反推合照中每个人的位置。报告只保留排序后的匿名序号、排位标签
+    即可反推群像图中每个人的位置。报告只保留排序后的匿名序号、位置标签
     与相似度指标，足以完整表达结论且不可还原个体位置。
     """
     out = []
     for i, r in enumerate(ranking, 1):
         out.append({
             "index": i,
-            "row": r.get("row", ""),
+            "position": r.get("position", ""),
             "cosine": r.get("cosine"),
             "euclidean": r.get("euclidean"),
             "is_target": bool(r.get("is_target")),
@@ -315,71 +403,57 @@ def anonymize_ranking(ranking):
 # --------------------------------------------------------------------------- #
 def run(args):
     group_path = resolve_source(args.group)
-    host_path = resolve_source(args.host)
+    reference_path = resolve_source(args.reference)
 
     img_g = cv2.imread(group_path)
     if img_g is None:
-        print(f"[error] 无法读取合照: {group_path}")
+        print(f"[error] 无法读取群像图: {group_path}")
         print("\n提示：把照片放进数据目录后重试，结构应为：")
-        print(f"          data/{config.DEFAULT_GROUP_NAME}   （大合照）")
-        print(f"          data/{config.DEFAULT_HOST_NAME}   （讲台特写）")
-        print("        也可用 --group/--host 直接指定路径，")
+        print(f"          data/{config.DEFAULT_GROUP_NAME}   （群像，多人）")
+        print(f"          data/{config.DEFAULT_REFERENCE_NAME}   （参考像，单人）")
+        print("        也可加 --samples 直接使用仓库自带的公开示例，")
         print("        或运行 `python scripts/prepare_data.py --check` 检查数据准备情况。")
         sys.exit(1)
-    img_h = cv2.imread(host_path)
-    if img_h is None:
-        print(f"[error] 无法读取讲台照片: {host_path}")
-        print("\n提示：把照片放进数据目录后重试，或用 --host 直接指定路径。")
+    img_r = cv2.imread(reference_path)
+    if img_r is None:
+        print(f"[error] 无法读取参考像: {reference_path}")
+        print("\n提示：把照片放进数据目录后重试，或用 --reference 直接指定路径。")
         sys.exit(1)
 
     hg, wg = img_g.shape[:2]
-    hh, wh = img_h.shape[:2]
+    hr, wr = img_r.shape[:2]
 
     thr = COS_THR_ARCFACE if BACKEND == "ArcFace" else COS_THR_SFACE
     dim = 512 if BACKEND == "ArcFace" else 128
 
     faces_g, _ = detect_faces(img_g)
-    faces_h, _ = detect_faces(img_h)
-    print(f"[group] 合照 {wg}x{hg} 检测到 {len(faces_g)} 张人脸")
-    print(f"[host]  讲台 {wh}x{hh} 检测到 {len(faces_h)} 张人脸")
+    faces_r, _ = detect_faces(img_r)
+    print(f"[group]    群像图 {wg}x{hg} 检测到 {len(faces_g)} 张人脸")
+    print(f"[reference] 参考像 {wr}x{hr} 检测到 {len(faces_r)} 张人脸")
 
-    # ---- 1) 合照目标：第一排最右 + 白衣 ----
-    front = [f for f in faces_g if f.center[1] > FRONT_ROW_Y_RATIO * hg]
-    front.sort(key=lambda f: f.center[0], reverse=True)      # 从最右往左
-    target, white_info = None, None
-    for f in front:
-        is_white, sat, val = white_cloth_check(img_g, f.bbox)
-        if is_white:
-            target, white_info = f, (sat, val)
-            break
-    if target is None and front:                             # 放宽：取第一排最右
-        target = front[0]
-        _, sat, val = white_cloth_check(img_g, target.bbox)
-        white_info = (sat, val)
-    if target is None and faces_g:                           # 兜底：全图最低人脸
-        target = max(faces_g, key=lambda f: f.center[1])
+    # ---- 1) 参考像中的主体（取最大人脸） ----
+    if not faces_r:
+        sys.exit("[error] 参考像中未检测到人脸")
+    subject = max(faces_r, key=lambda f: f.area)
+    print(f"[reference] 主体 bbox={subject.bbox} 中心={subject.center}")
+
+    # ---- 2) 群像图中的目标定位 ----
+    target, target_info = select_target(faces_g, img_g, args.target_strategy,
+                                        subject_emb=subject.embedding)
     if target is None:
-        sys.exit("[error] 合照中未检测到人脸")
-    if white_info is None:
-        # 兜底路径（无第一排人脸）未做白衣判据，此处补测一次，避免 white_info 为 None
-        _, sat, val = white_cloth_check(img_g, target.bbox)
-        white_info = (sat, val)
-    print(f"[group] 目标(第一排最右白衣): bbox={target.bbox} 中心={target.center} "
-          f"肩部HSV S={white_info[0]:.0f} V={white_info[1]:.0f}")
-
-    # ---- 2) 讲台主持人：排除前景观众头顶后取最大人脸 ----
-    cands = [f for f in faces_h if f.center[1] < HOST_MAX_Y_RATIO * hh] or faces_h
-    host = max(cands, key=lambda f: f.area)
-    print(f"[host]  主持人 bbox={host.bbox} 中心={host.center}")
+        sys.exit("[error] 群像图中未检测到人脸")
+    _, sat, val = white_cloth_check(img_g, target.bbox)
+    print(f"[group]    目标定位 [{target_info['matched_by']}] "
+          f"bbox={target.bbox} 肩部HSV S={sat:.0f} V={val:.0f}")
 
     os.makedirs(args.crop_dir, exist_ok=True)
     os.makedirs(args.out_dir, exist_ok=True)
     save_crop(img_g, target.bbox, os.path.join(args.crop_dir, "target_group.jpg"))
-    save_crop(img_h, host.bbox, os.path.join(args.crop_dir, "target_host.jpg"))
+    save_crop(img_r, subject.bbox, os.path.join(args.crop_dir, "subject_reference.jpg"))
 
     # ---- 3) 特征比对 ----
-    dist = euclidean(target.embedding, host.embedding)
-    cos = cosine(target.embedding, host.embedding)
+    dist = euclidean(target.embedding, subject.embedding)
+    cos = cosine(target.embedding, subject.embedding)
     same = cos >= thr
     title = "insightface ArcFace (512 维)" if BACKEND == "ArcFace" else "OpenCV SFace (128 维)"
 
@@ -390,33 +464,36 @@ def run(args):
     print(f"相似度置信度                : {confidence_pct(cos, thr):.2f}%")
     print(f"判定结论                    : {'是同一人' if same else '不是同一人'}")
 
-    # ---- 4) 遍历合照全部人脸 ----
+    # ---- 4) 遍历群像图全部人脸 ----
     # 内部保留 bbox 供可视化使用；写入 JSON 前会剥离坐标（见 anonymize_ranking）。
     ranking = []
     for f in faces_g:
-        c = cosine(f.embedding, host.embedding)
+        c = cosine(f.embedding, subject.embedding)
         ranking.append({
             "bbox": f.bbox,
             "center": [round(v, 1) for v in f.center],
-            "row": row_label(f.center[1], hg),
+            "position": row_label(f.center[1], hg),
             "cosine": round(c, 4),
-            "euclidean": round(euclidean(f.embedding, host.embedding), 4),
+            "euclidean": round(euclidean(f.embedding, subject.embedding), 4),
             "is_target": f is target,
             "same_person": c >= thr,
         })
     ranking.sort(key=lambda r: -r["cosine"])
 
-    print(f"\n========== 遍历合照 {len(faces_g)} 张人脸 vs 讲台人物 ==========")
-    print(f"{'排名':<6}{'排位':<8}{'余弦':<10}{'欧氏':<9}{'判定'}")
+    print(f"\n========== 遍历群像图 {len(faces_g)} 张人脸 vs 参考像主体 ==========")
+    print(f"{'排名':<6}{'位置':<10}{'余弦':<10}{'欧氏':<9}{'判定'}")
     for rank, r in enumerate(ranking, 1):
-        mark = "  <== 目标(第一排最右白衣)" if r["is_target"] else ""
-        print(f"#{rank:<5}{r['row']:<8}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
+        mark = "  <== 目标" if r["is_target"] else ""
+        print(f"#{rank:<5}{r['position']:<10}{r['cosine']:<10.4f}{r['euclidean']:<9.4f}"
               f"{'是' if r['same_person'] else '否'}{mark}")
 
     best = ranking[0]
     save_crop(img_g, best["bbox"], os.path.join(args.crop_dir, "best_match_group.jpg"))
-    print(f"\n最佳匹配: 排名1 ({best['row']}), 余弦={best['cosine']:.4f}, "
-          f"置信度={confidence_pct(best['cosine'], thr):.2f}%")
+    margin = (ranking[0]["cosine"] - ranking[1]["cosine"]) if len(ranking) > 1 else None
+    if margin is not None:
+        print(f"\n最佳匹配: 排名1 ({best['position']}), 余弦={best['cosine']:.4f}, "
+              f"置信度={confidence_pct(best['cosine'], thr):.2f}%, "
+              f"与排名2 相差 {margin:.4f}")
 
     # ---- 5) 可视化 ----
     vis_g = img_g.copy()
@@ -429,18 +506,18 @@ def run(args):
     out_g = os.path.join(args.out_dir, "result_group_annotated.jpg")
     cv2.imwrite(out_g, vis_g)
 
-    vis_h = img_h.copy()
-    x1, y1, x2, y2 = host.bbox
-    cv2.rectangle(vis_h, (x1, y1), (x2, y2), (0, 220, 60), 3)
-    cv2.putText(vis_h, "HOST", (x1, max(20, y1 - 8)),
+    vis_r = img_r.copy()
+    x1, y1, x2, y2 = subject.bbox
+    cv2.rectangle(vis_r, (x1, y1), (x2, y2), (0, 220, 60), 3)
+    cv2.putText(vis_r, "SUBJECT", (x1, max(20, y1 - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 220, 60), 2)
-    out_h = os.path.join(args.out_dir, "result_host_annotated.jpg")
-    cv2.imwrite(out_h, vis_h)
-    print(f"\n[save] 标注图: {out_g} , {out_h}")
+    out_r = os.path.join(args.out_dir, "result_reference_annotated.jpg")
+    cv2.imwrite(out_r, vis_r)
+    print(f"\n[save] 标注图: {out_g} , {out_r}")
 
     # ---- 6) JSON 报告 ----
     # 隐私约定：报告中**不写入**人脸框坐标与原始图片路径。
-    # 坐标若与原图同时泄露，可反推出合照中每个人的位置；
+    # 坐标若与原图同时泄露，可反推出群像图中每个人的位置；
     # 保留相似度/判定等统计量即可完整表达结论。
     report = {
         "backend": BACKEND,
@@ -448,11 +525,14 @@ def run(args):
         "threshold": {"cosine": thr, "euclidean_max": round(math.sqrt(2 * (1 - thr)), 4)},
         "source": {
             "group": {"faces_detected": len(faces_g), "size": [wg, hg]},
-            "host": {"faces_detected": len(faces_h), "size": [wh, hh]},
+            "reference": {"faces_detected": len(faces_r), "size": [wr, hr]},
         },
-        "target": {"row": row_label(target.center[1], hg),
-                   "shoulder_hsv": {"saturation": round(white_info[0], 1),
-                                    "value": round(white_info[1], 1)}},
+        "target": {
+            "strategy": target_info.get("strategy"),
+            "matched_by": target_info.get("matched_by"),
+            "position": row_label(target.center[1], hg),
+            "shoulder_hsv": {"saturation": round(sat, 1), "value": round(val, 1)},
+        },
         "comparison": {
             "euclidean_distance": round(dist, 4),
             "cosine_similarity": round(cos, 4),
@@ -463,6 +543,11 @@ def run(args):
         "privacy_note": "本报告已移除人脸框坐标与原始图片路径；"
                         "ranking.index 为按相似度排序后的匿名序号。",
     }
+    if margin is not None:
+        report["ranking_margin"] = {
+            "top1_minus_top2": round(margin, 4),
+            "note": "Top-1 与 Top-2 的余弦差，差值越大说明匹配越唯一",
+        }
     if args.report:
         os.makedirs(os.path.dirname(os.path.abspath(args.report)), exist_ok=True)
         with open(args.report, "w", encoding="utf-8") as fh:
@@ -479,10 +564,13 @@ def main():
         epilog="路径优先级：命令行 > 环境变量 > src/config.py 默认值。"
                "运行 `python src/config.py` 查看当前生效配置。",
     )
-    parser.add_argument("group", nargs="?", default=None, help="大合照路径")
-    parser.add_argument("host", nargs="?", default=None, help="讲台特写照片路径")
-    parser.add_argument("--group", dest="group_opt", help="大合照路径（覆盖位置参数）")
-    parser.add_argument("--host", dest="host_opt", help="讲台照片路径（覆盖位置参数）")
+    parser.add_argument("group", nargs="?", default=None, help="群像图路径（多人）")
+    parser.add_argument("reference", nargs="?", default=None, help="参考像路径（单人）")
+    parser.add_argument("--group", dest="group_opt", help="群像图路径（覆盖位置参数）")
+    parser.add_argument("--reference", dest="reference_opt",
+                        help="参考像路径（覆盖位置参数）")
+    parser.add_argument("--host", dest="host_opt",
+                        help="参考像路径的旧别名（等价于 --reference）")
     parser.add_argument("--data-dir", default=None,
                         help=f"数据目录（默认 {config.DATA_DIR}）")
     parser.add_argument("--out-dir", default=None,
@@ -491,19 +579,34 @@ def main():
                         help=f"人脸裁剪图输出目录（默认 {config.CROP_DIR}）")
     parser.add_argument("--report", default=None,
                         help=f"JSON 报告输出路径（默认 {config.REPORT}）")
+    parser.add_argument("--samples", action="store_true",
+                        help="使用仓库自带的公开示例（NASA 公有领域照片）")
+    parser.add_argument("--target-strategy", default="retrieve",
+                        choices=("retrieve", "largest", "front-right", "white-shirt"),
+                        help="群像图中目标人物的定位策略："
+                             "retrieve=群像中与参考像最相似者（默认）；"
+                             "largest=最大人脸；front-right=下半区最右；"
+                             "white-shirt=下半区最右且肩部为白色衣物")
     args = parser.parse_args()
 
     # --- 解析生效路径（命令行 > 环境变量 > 默认值） ---
     data_dir = config.resolve_dir(args.data_dir, config.DATA_DIR)
-    args.group = args.group_opt or args.group or config.default_input(data_dir)
-    args.host = args.host_opt or args.host or config.default_input(data_dir, config.DEFAULT_HOST_NAME)
+    # --samples 只填补「用户未显式指定」的路径，显式指定的优先级更高
+    if args.samples:
+        args.group = args.group_opt or args.group or config.sample(config.SAMPLE_GROUP_NAME)
+        args.reference = (args.reference_opt or args.host_opt or args.reference
+                          or config.sample(config.SAMPLE_REFERENCE_NAME))
+    else:
+        args.group = args.group_opt or args.group or config.default_input(data_dir)
+        args.reference = (args.reference_opt or args.host_opt or args.reference
+                          or config.default_input(data_dir, config.DEFAULT_REFERENCE_NAME))
     args.out_dir = config.resolve_dir(args.out_dir, config.OUT_DIR)
     args.crop_dir = config.resolve_dir(args.crop_dir, config.CROP_DIR)
     args.report = config.resolve_dir(args.report, config.REPORT)
 
     print(f"[init] 主后端: {'insightface ArcFace (512维)' if BACKEND == 'ArcFace' else 'OpenCV SFace (128维, 降级模式)'}")
-    print(f"[path] 合照: {args.group}")
-    print(f"[path] 讲台: {args.host}")
+    print(f"[path] 群像图: {args.group}")
+    print(f"[path] 参考像: {args.reference}")
     run(args)
 
 
